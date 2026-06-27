@@ -909,9 +909,6 @@ def analyze(name, mkt):
                         sorted(euro_d.items(), key=lambda x: BK_EURO.index(x[0])))
     result['欧赔'] = euro_v
     result['欧赔明细'] = euro_str
-    # 共识否决 → PASS（翻转后欧赔反对可接受）
-    if euro_v == '反对' and not flipped:
-        return _fin(result, 'PASS', f'共识否决：欧赔反对（{euro_str}）', info)
     if euro_v == '支持':
         verdicts.append('欧赔支持')
     else:
@@ -925,18 +922,15 @@ def analyze(name, mkt):
     info.append(f'{price_label}（{price_d}）')
     verdicts.append(f'价格{price_label}')
 
-    # ── ④ 风控否决（Risk Filter，含R4/R5结构否决）──
-    risk = check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signals)
-    if risk:
-        risk_conc, risk_reason = risk
-        info.append(risk_reason)
-        return _fin(result, risk_conc, risk_reason, info, flipped)
+    # ── 盘口管理分析（提前计算，确保所有路径都能输出）──
+    if dir_ah is not None:
+        _, bal_items = bookmaker_balance(mkt, dir_ah, flipped, name)
+        result['盘口管理'] = bal_items
 
-    # ── ⑤ 庄家反证（Bookmaker Challenge）──
+    # ── 庄家反证（Bookmaker Challenge，提前计算）──
     bc_level, bc_reason = bookmaker_challenge(mkt, dir_ah, active, price_v, euro_v)
     result['BC'] = bc_level
     result['BC理由'] = bc_reason
-    # BC判决映射
     if bc_level == '过热':
         result['BC判决'] = '过热'
         info.append(f'方向过热：{bc_reason}')
@@ -946,10 +940,16 @@ def analyze(name, mkt):
     else:
         result['BC判决'] = '无异议'
 
-    # ── 盘口管理分析（Line Management，不参与决策）──
-    if dir_ah is not None:
-        _, bal_items = bookmaker_balance(mkt, dir_ah, flipped, name)
-        result['盘口管理'] = bal_items
+    # 共识否决 → PASS（翻转后欧赔反对可接受，但放在价格/BC/盘口之后确保完整输出）
+    if euro_v == '反对' and not flipped:
+        return _fin(result, 'PASS', f'共识否决：欧赔反对（{euro_str}）', info)
+
+    # ── ④ 风控否决（Risk Filter，含R4/R5结构否决）──
+    risk = check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signals)
+    if risk:
+        risk_conc, risk_reason = risk
+        info.append(risk_reason)
+        return _fin(result, risk_conc, risk_reason, info, flipped)
 
     # ── ⑥ 最终决策（Final Decision）──
     if flipped:
