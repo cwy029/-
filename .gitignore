@@ -1,0 +1,6 @@
+results_log.jsonl
+__pycache__/
+.archive/
+.recovery/
+*.bak
+.env.json
