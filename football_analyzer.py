@@ -21,9 +21,9 @@ import json, sys
 
 BK_CORE = ['Pinnacle', 'Bet365', 'singbet']
 BK_EURO = ['Pinnacle', 'Bet365', 'singbet']
-BK_LABEL = {'Pinnacle': 'Pin', 'Bet365': '365', 'singbet': '皇冠',
+BK_LABEL = {'Pinnacle': 'Pin', 'Bet365': '365', 'singbet': 'Crown',
             '澳门彩票': '澳门'}
-BK_FULL = {'Pinnacle': 'Pinnacle', 'Bet365': 'Bet365', 'singbet': '皇冠',
+BK_FULL = {'Pinnacle': 'Pinnacle', 'Bet365': 'Bet365', 'singbet': 'Crown',
            '澳门彩票': '澳门彩票'}
 
 def _fl(v):
@@ -512,7 +512,7 @@ def check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signa
     #  风控否决（三条硬过滤器，不参与方向判断）
     #
     #  R4 结构冲突   — Pin(专业) ≠ 365(大众) → 市场无共识 → PASS
-    #  R5 亚洲盘口   — Pin=365 但皇冠反向 → 亚洲不给确认 → PASS
+    #  R5 亚洲盘口   — Pin=365 但Crown反向 → 亚洲不给确认 → PASS
     #  R3 价格否决   — 偏贵 + 方向弱(无追价) → 不值 → PASS
     #
     #  三者职责清晰、不重叠、不打架
@@ -530,7 +530,7 @@ def check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signa
         if p_s != '0' and b_s != '0' and p_s != b_s:
             return 'PASS', f'结构否决：Pin{p_s} vs 365{b_s}相反'
 
-    # R5: 亚洲盘口否决 — 专业+大众一致，但皇冠反向
+    # R5: 亚洲盘口否决 — 专业+大众一致，但Crown反向
     if signals:
         p_s = signals.get('Pinnacle', '0')
         b_s = signals.get('Bet365', '0')
@@ -768,7 +768,7 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
 
     # ── 大小球配合（始终输出） ──
     ou_summary = []
-    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('singbet', '皇冠')]:
+    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('singbet', 'Crown')]:
         sc = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
         cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
         if sc and cc:
@@ -1079,7 +1079,7 @@ def _parse_md(text):
                         bk = 'William Hill'
                     elif 'Bet365' in bk or 'bet365' in bk:
                         bk = 'Bet365'
-                    elif 'singbet' in bk or '皇冠' in bk or 'sbobet' in bk.lower() or 'Sbobet' in bk:
+                    elif 'singbet' in bk or '皇冠' in bk or 'Crown' in bk or 'sbobet' in bk.lower():
                         bk = 'singbet'
                     elif '澳门' in bk:
                         bk = '澳门彩票'
