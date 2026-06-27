@@ -17,7 +17,7 @@ V8 规则引擎
   → EXECUTE
 """
 
-import json, sys
+import json, sys, re
 
 BK_CORE = ['Pinnacle', 'Bet365', 'singbet']
 BK_EURO = ['Pinnacle', 'Bet365', 'singbet']
@@ -33,6 +33,8 @@ def _fl(v):
     # 去掉 (↑) (↓) 等升降标记
     if '(' in v:
         v = v[:v.index('(')].strip()
+    # 去掉尾部升降箭头（如 1.98 ↓）
+    v = re.sub(r'\s*[↑↓]+\s*$', '', v).strip()
     if not v:
         return None
     return float(v)
@@ -1036,6 +1038,15 @@ def _parse_md(text):
             if ' vs ' not in name and ' VS ' in name:
                 name = name.replace(' VS ', ' vs ')
 
+        # 对阵信息行：- **对阵**: 哥伦比亚 vs 葡萄牙
+        m_vs_info = re.search(r'[-\*]*\s*\*?\*?\s*对阵\s*\*?\*?\s*[：:]\s*(.+?)\s*$', l)
+        if m_vs_info and 'vs' in m_vs_info.group(1).lower():
+            name = m_vs_info.group(1).strip()
+            name = re.sub(r'\s*\[\d+\]', '', name)
+            name = re.sub(r'[（(].*?[）)]', '', name).strip()
+            if ' vs ' not in name and ' VS ' in name:
+                name = name.replace(' VS ', ' vs ')
+
         # 有比赛名就进入数据采集
         if name:
             curr = {}
@@ -1092,8 +1103,8 @@ def _parse_md(text):
                             snap.setdefault(bk, {})
                             curr.setdefault(bk, {})
                             try:
-                                snap_ml = {'home': float(cols[1]), 'draw': float(cols[2]), 'away': float(cols[3])}
-                                curr_ml = {'home': float(cols[4]), 'draw': float(cols[5]), 'away': float(cols[6])}
+                                snap_ml = {'home': _fl(cols[1]), 'draw': _fl(cols[2]), 'away': _fl(cols[3])}
+                                curr_ml = {'home': _fl(cols[4]), 'draw': _fl(cols[5]), 'away': _fl(cols[6])}
                                 snap[bk]['ML'] = {'1': snap_ml}
                                 curr[bk]['ML'] = {'1': curr_ml}
                             except:
@@ -1106,9 +1117,14 @@ def _parse_md(text):
                         if len(cols) >= 7:
                             snap.setdefault(bk, {})
                             curr.setdefault(bk, {})
-                            # 自动检测：如果cols[1]是数字→格式B(水在前)，否则格式A(盘在前)
+                            # 用表头检测：若 header_cols[1] 含"主水"或"客水"→格式B
+                            is_fmt_b = False
                             try:
-                                float(cols[1])
+                                h1 = header_cols[1] if header_cols else ''
+                                is_fmt_b = '主水' in h1 or '客水' in h1
+                            except:
+                                pass
+                            if is_fmt_b:
                                 # 格式B: 水 盘 水 | 水 盘 水
                                 snap_hw = _fl(cols[1])
                                 snap_hcp = _parse_hcp(cols[2])
@@ -1116,7 +1132,7 @@ def _parse_md(text):
                                 curr_hw = _fl(cols[4])
                                 curr_hcp = _parse_hcp(cols[5])
                                 curr_aw = _fl(cols[6])
-                            except (ValueError, TypeError):
+                            else:
                                 # 格式A: 盘 水 水 | 盘 水 水
                                 snap_hcp = _parse_hcp(cols[1])
                                 snap_hw = _fl(cols[2])
