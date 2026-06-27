@@ -505,11 +505,16 @@ def check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signa
             dir_on_fav = True
 
     # ═══════════════════════════════════════════
-    #  ④ 风控否决（只保留可验证的铁律）
-    #  R1（诱盘）和 R2（兑现条件）已移除——缺乏成交量等佐证数据，捕风捉影
+    #  风控否决（三条硬过滤器，不参与方向判断）
+    #
+    #  R4 结构冲突   — Pin(专业) ≠ 365(大众) → 市场无共识 → PASS
+    #  R5 亚洲盘口   — Pin=365 但皇冠反向 → 亚洲不给确认 → PASS
+    #  R3 价格否决   — 偏贵 + 方向弱(无追价) → 不值 → PASS
+    #
+    #  三者职责清晰、不重叠、不打架
     # ═══════════════════════════════════════════
 
-    # R4: Pin vs 365 结构冲突（硬否决）
+    # R4: 结构冲突 — 专业 vs 大众意见分裂
     if signals:
         p_s = signals.get('Pinnacle', '0')
         b_s = signals.get('Bet365', '0')
@@ -521,7 +526,7 @@ def check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signa
         if p_s != '0' and b_s != '0' and p_s != b_s:
             return 'PASS', f'结构否决：Pin{p_s} vs 365{b_s}相反'
 
-    # R5: 皇冠逆多数（硬否决）
+    # R5: 亚洲盘口否决 — 专业+大众一致，但皇冠反向
     if signals:
         p_s = signals.get('Pinnacle', '0')
         b_s = signals.get('Bet365', '0')
@@ -529,8 +534,8 @@ def check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signa
         if p_s != '0' and b_s != '0' and p_s == b_s and s_s != '0' and s_s != p_s:
             return 'PASS', f'结构否决：singbet{s_s}与Pin{p_s}/365{b_s}相反'
 
-    # R3: 弱方向 + 价格偏贵 → PASS（仅让球方方向）
-    # 受让方方向本就降级 WATCHLIST，不需要 R3 再去否决
+    # R3: 价格否决 — 价格偏贵 + 市场方向弱（多数未追价）
+    # 单纯偏贵不否决（可能仍有正EV），加上方向弱才否决
     if price_v == '偏贵' and dir_on_fav and (active <= 1 or qual == '偏弱'):
         return 'PASS', '弱方向+价格偏贵，无交易价值'
 
