@@ -5,7 +5,7 @@ V8 规则引擎
 公司职责（写死）：
   Pinnacle    → 专业市场、价格锚、公平价基准
   Bet365      → 大众市场、方向投票
-  Sbobet(皇冠) → 亚洲盘口确认、结构验证
+  singbet → 亚洲盘口确认、结构验证
   澳门彩票     → 欧赔验证
   William Hill → 欧赔验证
 
@@ -19,11 +19,11 @@ V8 规则引擎
 
 import json, sys
 
-BK_CORE = ['Pinnacle', 'Bet365', 'Sbobet']
-BK_EURO = ['Pinnacle', 'Bet365', 'Sbobet', 'William Hill']
-BK_LABEL = {'Pinnacle': 'Pin', 'Bet365': '365', 'Sbobet': '皇冠',
+BK_CORE = ['Pinnacle', 'Bet365', 'singbet']
+BK_EURO = ['Pinnacle', 'Bet365', 'singbet', 'William Hill']
+BK_LABEL = {'Pinnacle': 'Pin', 'Bet365': '365', 'singbet': '皇冠',
             '澳门彩票': '澳门', 'William Hill': '威廉'}
-BK_FULL = {'Pinnacle': 'Pinnacle', 'Bet365': 'Bet365', 'Sbobet': '皇冠',
+BK_FULL = {'Pinnacle': 'Pinnacle', 'Bet365': 'Bet365', 'singbet': '皇冠',
            '澳门彩票': '澳门彩票', 'William Hill': '威廉希尔'}
 
 def _fl(v):
@@ -68,7 +68,7 @@ def _rw(v):
 
 
 def _pick_deepest_line(src, dir_ah):
-    """只在核心亚盘三家（Pin/365/皇冠）中挑选最深线位
+    """只在核心亚盘三家（Pin/365/singbet）中挑选最深线位
     澳门/威廉职责为欧赔验证，不参与亚盘线位决策
     """
     bl = None
@@ -89,7 +89,7 @@ def _pick_deepest_line(src, dir_ah):
 # ═══════════════════════════════════════════
 
 def get_direction(mkt):
-    """Pin/365/皇冠 三家亚盘投票
+    """Pin/365/singbet 三家亚盘投票
     if 有变化 → 分析Direction（变化）
     else → 分析State（静态线位）
     返回 (dir_ah, quality, signals, dissent_bk, active, mode)
@@ -168,14 +168,14 @@ def check_structure(signals, dir_ah, pin_has_data):
     """亚盘结构一致性"""
     p_s = signals.get('Pinnacle', '0')
     b_s = signals.get('Bet365', '0')
-    s_s = signals.get('Sbobet', '0')
+    s_s = signals.get('singbet', '0')
 
     if p_s == '0' and not pin_has_data:
         return 'WATCHLIST', 'Pin无数据'
     if p_s != '0' and b_s != '0' and p_s != b_s:
         return 'PASS', f'Pin{p_s} vs 365{b_s}相反'
     if p_s != '0' and b_s != '0' and p_s == b_s and s_s != '0' and s_s != p_s:
-        return 'PASS', f'皇冠{s_s}与Pin{p_s}/365{b_s}相反'
+        return 'PASS', f'singbet{s_s}与Pin{p_s}/365{b_s}相反'
     return 'OK', None
 
 
@@ -340,7 +340,7 @@ def check_price(mkt, dir_ah, price_side=None):
     following = 0
     detail = []
 
-    for bk in ['Bet365', 'Sbobet', 'William Hill']:
+    for bk in ['Bet365', 'singbet', 'William Hill']:
         curr_sp = next(iter(mkt.get('curr', {}).get(bk, {}).get('Spread', {}).values()), {})
         snap_sp = next(iter(mkt.get('snap', {}).get(bk, {}).get('Spread', {}).values()), {})
         curr_l  = _fl(curr_sp.get('line'))
@@ -439,7 +439,7 @@ def check_ou(mkt):
     交叉确认：线位方向 + 水位方向配合
     """
     cv = ov = None
-    for bk in ['Pinnacle', 'Bet365', 'Sbobet']:
+    for bk in ['Pinnacle', 'Bet365', 'singbet']:
         cv = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
         ov = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
         if cv is not None and ov is not None:
@@ -548,7 +548,7 @@ def check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signa
     # 让球方需要大球支持才能穿盘 → 大球退盘 = 进不去球
     # 受让方不需要大球支持，大小球退盘对受让方是利好（小球格局，不易惨败）
     ou = None
-    for bk in ['Pinnacle', 'Bet365', 'Sbobet']:
+    for bk in ['Pinnacle', 'Bet365', 'singbet']:
         cv = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
         ov = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
         if cv is not None and ov is not None:
@@ -577,16 +577,16 @@ def check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signa
     if signals:
         p_s = signals.get('Pinnacle', '0')
         b_s = signals.get('Bet365', '0')
-        s_s = signals.get('Sbobet', '0')
+        s_s = signals.get('singbet', '0')
         pin_has = ('Spread' in mkt.get('curr', {}).get('Pinnacle', {}) or
                    'Spread' in mkt.get('snap', {}).get('Pinnacle', {}))
         if p_s == '0' and not pin_has:
             return 'WATCHLIST', 'Pin无数据'
         if p_s != '0' and b_s != '0' and p_s != b_s:
             return 'PASS', f'结构否决：Pin{p_s} vs 365{b_s}相反'
-        # R5: 皇冠逆多数
+        # R5: singbet逆多数
         if p_s != '0' and b_s != '0' and p_s == b_s and s_s != '0' and s_s != p_s:
-            return 'PASS', f'结构否决：皇冠{s_s}与Pin{p_s}/365{b_s}相反'
+            return 'PASS', f'结构否决：singbet{s_s}与Pin{p_s}/365{b_s}相反'
 
     return None
 
@@ -614,7 +614,7 @@ def bookmaker_challenge(mkt, dir_ah, active, price_v, euro_v):
 
     # ── BC1: 线位同步 ──
     moves = {}
-    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('Sbobet', '皇冠')]:
+    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('singbet', 'singbet')]:
         sl = _ln(bk, mkt.get('snap', {}))
         cl = _ln(bk, mkt.get('curr', {}))
         if sl is not None and cl is not None and round(cl - sl, 2) != 0:
@@ -813,7 +813,7 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
 
     # ── 大小球配合（始终输出） ──
     ou_summary = []
-    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('Sbobet', '皇冠'), ('William Hill', '威廉')]:
+    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('singbet', 'singbet'), ('William Hill', '威廉')]:
         sc = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
         cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
         if sc and cc:
@@ -1116,8 +1116,8 @@ def _parse_md(text):
                         bk = 'William Hill'
                     elif 'Bet365' in bk or 'bet365' in bk:
                         bk = 'Bet365'
-                    elif '皇冠' in bk or 'Sbobet' in bk or 'sbobet' in bk:
-                        bk = 'Sbobet'
+                    elif 'singbet' in bk:
+                        bk = 'singbet'
                     elif '澳门' in bk:
                         bk = '澳门彩票'
                     elif 'Pinnacle' in bk or '平博' in bk or 'Pin' in bk:
