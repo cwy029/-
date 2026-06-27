@@ -505,7 +505,8 @@ def check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signa
             dir_on_fav = True
 
     # ═══════════════════════════════════════════
-    #  ④ 风控否决（全部为Filter，不参与方向判断）
+    #  ④ 风控否决（只保留可验证的铁律）
+    #  R1（诱盘）和 R2（兑现条件）已移除——缺乏成交量等佐证数据，捕风捉影
     # ═══════════════════════════════════════════
 
     # R4: Pin vs 365 结构冲突（硬否决）
@@ -528,64 +529,10 @@ def check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signa
         if p_s != '0' and b_s != '0' and p_s == b_s and s_s != '0' and s_s != p_s:
             return 'PASS', f'结构否决：singbet{s_s}与Pin{p_s}/365{b_s}相反'
 
-    # R1: 诱盘检测 — 连续降水但盘口应升未升（多家一致）
-    if dir_on_fav:
-        bl = _pick_deepest_line(mkt['curr'], dir_ah)
-        bl_snap = _pick_deepest_line(mkt['snap'], dir_ah)
-        if bl is not None and bl_snap is not None:
-            line_unchanged = (dir_ah == '+' and bl >= bl_snap) or (dir_ah == '-' and bl <= bl_snap)
-            if line_unchanged:
-                # 检查多家软庄是否一致大幅降水（≥0.08）
-                wkey = 'home' if dir_ah == '+' else 'away'
-                drop_count = 0
-                for bk in ['Bet365', 'singbet']:
-                    snap_sp = next(iter(mkt.get('snap', {}).get(bk, {}).get('Spread', {}).values()), {})
-                    curr_sp = next(iter(mkt.get('curr', {}).get(bk, {}).get('Spread', {}).values()), {})
-                    snap_w = _fl(snap_sp.get(wkey))
-                    curr_w = _fl(curr_sp.get(wkey))
-                    if snap_w and curr_w and (snap_w - curr_w) >= 0.08:
-                        drop_count += 1
-                if drop_count >= 2:
-                    return 'WATCHLIST', f'诱盘预警：方向方连续大幅降水但线位未推深'
-
-    # R2: 兑现条件 — 让球方方向 + 大小球退盘 + 水位方向联动判断
-    if dir_on_fav:
-        for bk in ['Pinnacle', 'Bet365', 'singbet']:
-            sc = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
-            cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
-            if sc and cc:
-                ol = _fl(sc.get('line'))
-                cl = _fl(cc.get('line'))
-                op = _fl(sc.get('home'))   # 大球水(初)
-                cp = _fl(cc.get('home'))   # 大球水(现)
-                if cl is not None and ol is not None and op is not None and cp is not None:
-                    ou_chg = cl - ol       # 退盘为负
-                    w_chg = cp - op        # 大球水变动
-                    # 退盘 + 小球水降（真小）→ 不支持穿盘
-                    if ou_chg <= -0.25 and w_chg <= -0.05:
-                        return 'WATCHLIST', f'兑现不足：让球方方向但大小球真退盘（{ol:.2f}→{cl:.2f},大球水{op:.2f}→{cp:.2f}）'
-                    # 退盘 + 大球水涨或不动（诱小或中性）→ 不触发
-                break
-
-    # R3: 价格明显偏贵且多数追价 → WATCHLIST/PASS（仅让球方方向）
-    if price_v == '偏贵' and dir_on_fav:
-        # 检查追价数量（需要多数一致性）
-        chasing_count = 0
-        for bk in ['Bet365', 'singbet']:
-            curr_sp = next(iter(mkt.get('curr', {}).get(bk, {}).get('Spread', {}).values()), {})
-            snap_sp = next(iter(mkt.get('snap', {}).get(bk, {}).get('Spread', {}).values()), {})
-            curr_l = _fl(curr_sp.get('line'))
-            snap_l = _fl(snap_sp.get('line'))
-            curr_w = _fl(curr_sp.get(wkey))
-            snap_w = _fl(snap_sp.get(wkey))
-            if curr_w and snap_w and curr_l and snap_l and abs(curr_l - snap_l) < 0.01:
-                delta = round(curr_w - snap_w, 2)
-                if delta <= -0.08:
-                    chasing_count += 1
-        if chasing_count >= 2:
-            if active <= 1 or qual == '偏弱':
-                return 'PASS', '弱方向+价格明显偏贵，无交易价值'
-            return 'WATCHLIST', f'价格偏贵（多数追价）'
+    # R3: 弱方向 + 价格偏贵 → PASS（仅让球方方向）
+    # 受让方方向本就降级 WATCHLIST，不需要 R3 再去否决
+    if price_v == '偏贵' and dir_on_fav and (active <= 1 or qual == '偏弱'):
+        return 'PASS', '弱方向+价格偏贵，无交易价值'
 
     return None
 
