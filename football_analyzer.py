@@ -124,40 +124,10 @@ def get_direction(mkt):
             qual = '分歧'
         return dir_ah, qual, signals, dissent_bk, active, 'change'
 
-    # 无变动 → 按静态线位
-    lines = []
-    for bk in BK_CORE:
-        sp = _gs(bk, mkt['curr'])
-        ln = _fl(sp.get('line'))
-        if ln is not None:
-            lines.append(ln)
-            # 静态信号：<0=让球方(+)  >0=受让方(-)  0=平手
-            if ln < 0:
-                signals[bk] = '+'
-            elif ln > 0:
-                signals[bk] = '-'
-            else:
-                signals[bk] = '0'
-        else:
-            signals[bk] = '0'
-
-    vf = sum(1 for s in signals.values() if s == '+')
-    va = sum(1 for s in signals.values() if s == '-')
-
-    if vf > va:
-        dir_ah = '+'; maj = vf; min_ = va
-    elif va > vf:
-        dir_ah = '-'; maj = va; min_ = vf
-    else:
-        # 3家线位矛盾（理论上不会出现），或无数据
-        return None, None, signals, None, 0, None
-
-    # 静态状态也判断分歧：线位不一致就是分歧
-    mn = min(lines) if lines else 0
-    mx = max(lines) if lines else 0
-    qual = '分歧' if mx - mn > 0.2 else '一致'
-    active = vf + va
-    return dir_ah, qual, signals, None, active, 'static'
+    # 无变动 → 无方向（取消静态线位指向，避免天然推上盘）
+    # 线位没有变化时，三家投票都是0，直接返回无方向
+    sigs = ' '.join(f'{BK_LABEL[b]}{signals[b]}' for b in BK_CORE)
+    return None, None, signals, None, 0, None
 
 
 # ═══════════════════════════════════════════
