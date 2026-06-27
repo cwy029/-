@@ -811,19 +811,22 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
     if tools:
         items.append('庄家工具：' + ' | '.join(tools))
 
-    # ── 大小球配合 ──
-    if ou_val is not None:
-        snap_ou = None
-        for bk in ['Pinnacle', 'Bet365']:
-            ov = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
-            if ov:
-                snap_ou = _fl(ov.get('line'))
-                break
-        if snap_ou and abs(ou_val - snap_ou) >= 0.25:
-            ou_mv = '升盘' if ou_val > snap_ou else '退盘'
-            items.append(f'大小球：{_fmt(snap_ou)} → {_fmt(ou_val)} {ou_mv}')
-        elif ab >= 1.5 and ou_val and ou_val >= ab + 0.75:
-            items.append(f'深盘（{_fmt(curr_pin)}）配大球（{_fmt(ou_val)}）')
+    # ── 大小球配合（始终输出） ──
+    ou_summary = []
+    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('Sbobet', '皇冠'), ('William Hill', '威廉')]:
+        sc = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
+        cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+        if sc and cc:
+            sl = _fl(sc.get('line'))
+            cl = _fl(cc.get('line'))
+            so = _fl(sc.get('home'))  # 大球水
+            co = _fl(cc.get('home'))
+            if sl is not None and cl is not None and so is not None and co is not None:
+                line_chg = '升盘' if cl > sl else '退盘' if cl < sl else '线位不动'
+                water_chg = f"{'涨' if co > so else '降'}{abs(co-so):.2f}" if abs(co-so)>=0.02 else '水不动'
+                ou_summary.append(f'{label}{_fmt(sl)}→{_fmt(cl)}({line_chg},{water_chg})')
+    if ou_summary:
+        items.append('大小球：' + ' | '.join(ou_summary))
 
     # ── 结算简表（4种典型赛果） ──
     settlement = []
