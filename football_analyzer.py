@@ -7,7 +7,7 @@ V8 规则引擎
   Bet365      → 大众市场、方向投票
   singbet → 亚洲盘口确认、结构验证
   澳门彩票     → 欧赔验证
-  William Hill → 欧赔验证
+  庄家精简为3家，威廉和澳门移除
 
 流程：
   ① 找方向
@@ -20,11 +20,11 @@ V8 规则引擎
 import json, sys
 
 BK_CORE = ['Pinnacle', 'Bet365', 'singbet']
-BK_EURO = ['Pinnacle', 'Bet365', 'singbet', 'William Hill']
+BK_EURO = ['Pinnacle', 'Bet365', 'singbet']
 BK_LABEL = {'Pinnacle': 'Pin', 'Bet365': '365', 'singbet': '皇冠',
-            '澳门彩票': '澳门', 'William Hill': '威廉'}
+            '澳门彩票': '澳门'}
 BK_FULL = {'Pinnacle': 'Pinnacle', 'Bet365': 'Bet365', 'singbet': '皇冠',
-           '澳门彩票': '澳门彩票', 'William Hill': '威廉希尔'}
+           '澳门彩票': '澳门彩票'}
 
 def _fl(v):
     if v is None:
@@ -310,7 +310,7 @@ def check_price(mkt, dir_ah, price_side=None):
     following = 0
     detail = []
 
-    for bk in ['Bet365', 'singbet', 'William Hill']:
+    for bk in ['Bet365', 'singbet']:
         curr_sp = next(iter(mkt.get('curr', {}).get(bk, {}).get('Spread', {}).values()), {})
         snap_sp = next(iter(mkt.get('snap', {}).get(bk, {}).get('Spread', {}).values()), {})
         curr_l  = _fl(curr_sp.get('line'))
@@ -783,7 +783,7 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
 
     # ── 大小球配合（始终输出） ──
     ou_summary = []
-    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('singbet', 'singbet'), ('William Hill', '威廉')]:
+    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('singbet', '皇冠')]:
         sc = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
         cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
         if sc and cc:
