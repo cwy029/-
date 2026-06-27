@@ -812,7 +812,6 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
             items.append(f'结算：{s}')
 
     # ── 综合赔付结构表（亚盘+大小球对照） ──
-    # 取 Pin 大小球线位作为参考
     pin_ou = None
     for bk in ['Pinnacle']:
         cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
@@ -820,85 +819,108 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
             pin_ou = _fl(cc.get('line'))
     if pin_ou is not None and curr_pin is not None:
         ou_ln = pin_ou
-        payout_lines = ['  赛果           │ 亚盘              │ 大小球']
-        payout_lines.append('  ──────────────┼──────────────────┼──────────')
+        pin_ou_w = None
+        pin_un_w = None
+        for bk in ['Pinnacle']:
+            cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+            if cc:
+                pin_ou_w = _fl(cc.get('home'))
+                pin_un_w = _fl(cc.get('under'))
         
-        # 根据方向生成典型比分
-        if dir_on_fav:
-            # 让球方：展示几种典型赢球数
-            margin = int(ab) if ab == int(ab) else int(ab) + 1
-            scores = []
-            # 走水/输半线附近
+        # 标题行：显示盘口和赔率
+        ah_line_str = f'{team}{sign}{_fmt(curr_pin)}'
+        
+        # 取亚盘方向方水位
+        ah_water = _fl(curr_sp.get(wkey))
+        ou_water = pin_ou_w
+        un_water = pin_un_w
+        
+        items.append(f'  亚盘：{ah_line_str} @ {ah_water:.2f}' if ah_water else f'  亚盘：{ah_line_str}')
+        if ou_water and un_water:
+            items.append(f'  大小球：{_fmt(ou_ln)}（大球 {ou_water:.2f} / 小球 {un_water:.2f}）')
+        
+        # 表头
+        items.append(f'  {"赛果":20s}│ {"亚盘":14s}│ {"大小球":14s}│ 庄家结算')
+        items.append(f'  {"─"*20}┼{"─"*16}┼{"─"*16}┼{"─"*12}')
+        
+        def ah_result(g, ab, quarter):
             if quarter == 0:
-                scores.append((ab, True))     # 刚好赢ab球→走水
+                if g > ab: return '全收'
+                elif g == ab: return '走水'
+                else: return '全输'
             elif quarter == 2:
-                scores.append((ab - 0.25, True))  # 输半
-                scores.append((ab + 0.25, True))  # 全收
+                if g >= ab + 0.25: return '全收'
+                elif g >= ab - 0.25: return '输半'
+                else: return '全输'
             else:
-                scores.append((ab - 0.25, False))  # 输半
-                scores.append((ab + 0.25, False))  # 全收
-            # 加一个穿盘比分
-            scores.append((ab + 1.25, True))
+                if g >= ab + 0.25: return '全收'
+                elif g >= ab - 0.25: return '输半'
+                else: return '全输'
+        
+        def ou_result(g, ou_ln):
+            if g > ou_ln + 0.01: return '大球'
+            elif g < ou_ln - 0.01: return '小球'
+            else: return '走水'
+        
+        def settlement_label(ah, ou):
+            # 简单判断庄家赚/赔
+            if ah == '全输' and ou in ('小球', '—'):
+                return '净赚'
+            elif ah == '全输' and ou == '大球':
+                return '赚(OU赔)'
+            elif ah == '全收' and ou == '大球':
+                return '净赔'
+            elif ah == '全收' and ou == '小球':
+                return '赔(AH赚OU)'
+            elif ah == '全收' and ou == '走水':
+                return '赔(AH)'
+            elif ah == '输半' and ou == '小球':
+                return '微赚'
+            elif ah == '走水' and ou == '小球':
+                return '赚(OU)'
+            else:
+                return '—'
+        
+        if dir_on_fav:
+            # 让球方：不同赢球数
+            test_scores = []
+            # 赢球门：输半线、全收线、穿大盘线
+            if quarter == 2:
+                test_scores.append(ab - 0.25)  # 输半
+                test_scores.append(ab + 0.25)  # 全收
+            elif quarter == 0:
+                test_scores.append(ab)  # 走水
+                test_scores.append(ab + 1)  # 全收
+            else:
+                test_scores.append(ab - 0.25)
+                test_scores.append(ab + 0.25)
+            test_scores.append(ab + 1.75)  # 大穿盘
+            test_scores = sorted(set(round(s, 2) for s in test_scores if s >= 0.5))
             
-            for g, _ in scores:
+            # 首行加一个"输或平"
+            label = f'{team} 输或平'
+            ah_r = '全输'
+            items.append(f'  {label:20s}│ AH{ah_r:12s}│ {"—":14s}│ {settlement_label(ah_r, '\u2014')}')
+            
+            for g in test_scores:
                 g = round(g, 2)
-                if g < 0.5:
-                    continue
-                # 比分展示
-                # 大小球结果
-                if g > ou_ln + 0.01:
-                    ou_r = '大球'
-                elif g < ou_ln - 0.01:
-                    ou_r = '小球'
-                else:
-                    ou_r = '走水'
-                # 亚盘
-                if quarter == 0:
-                    if g > ab:
-                        ah_r = '全收'
-                    elif g == ab:
-                        ah_r = '走水'
-                    else:
-                        ah_r = '全输'
-                elif quarter == 2:
-                    if g >= ab + 0.25:
-                        ah_r = '全收'
-                    elif g >= ab - 0.25:
-                        ah_r = '输半'
-                    else:
-                        ah_r = '全输'
-                else:
-                    if g >= ab + 0.25:
-                        ah_r = '全收'
-                    elif g >= ab - 0.25:
-                        ah_r = '输半'
-                    else:
-                        ah_r = '全输'
-                # 比分标签
-                if dir_on_fav:
-                    score_label = f'{team} 赢 {_fmt(g)}'
-                else:
-                    score_label = f'{team} 赢或平' if g == 0 else f'{team} 输 {_fmt(g)}'
-                payout_lines.append(f'  {score_label:16s}│ AH{ah_r:14s}│ {ou_r}')
+                label = f'{team} 赢 {_fmt(g)} 球'
+                ah_r = ah_result(g, ab, quarter)
+                ou_r = ou_result(g, ou_ln)
+                items.append(f'  {label:20s}│ AH{ah_r:12s}│ {ou_r:14s}│ {settlement_label(ah_r, ou_r)}')
         else:
-            # 受让方：赢/平、输1球、输2球
+            # 受让方
             for loss in [0, 1, 2]:
                 if loss == 0:
-                    ah_r = '全收'
                     label = f'{team} 赢或平'
+                    ah_r = '全收'
                 elif loss == 1:
-                    ah_r = '输半'
                     label = f'{team} 输 1 球'
+                    ah_r = '输半'
                 else:
-                    ah_r = '全输'
                     label = f'{team} 输 2 球'
-                # 大小球无法直接判断（不知道具体比分总进球）
-                ou_r = '—'
-                payout_lines.append(f'  {label:16s}│ AH{ah_r:14s}│ {ou_r}')
-        
-        if len(payout_lines) > 3:
-            for pl in payout_lines:
-                items.append(pl)
+                    ah_r = '全输'
+                items.append(f'  {label:20s}│ AH{ah_r:12s}│ {"—":14s}│ {settlement_label(ah_r, '\u2014')}')
 
     return '', items
 
