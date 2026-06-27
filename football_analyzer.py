@@ -107,8 +107,12 @@ def get_direction(mkt):
     if active > 0:
         if votes_for > votes_agst:
             dir_ah = '+'; maj = votes_for; min_ = votes_agst
-        else:
+        elif votes_agst > votes_for:
             dir_ah = '-'; maj = votes_agst; min_ = votes_for
+        else:
+            # 1-1 平票，方向不明确
+            sigs = ' '.join(f'{BK_LABEL[b]}{signals[b]}' for b in BK_CORE)
+            return None, None, signals, None, active, 'change'
 
         dissent_bk = None
         if maj == 3:
@@ -953,11 +957,17 @@ def analyze(name, mkt):
 
     # ── ⑥ 最终决策（Final Decision）──
     if flipped:
+        # 翻转后若欧赔仍反对，说明新方向也缺乏支持，直接PASS
+        if euro_v == '反对':
+            return _fin(result, 'PASS', '翻转后欧赔仍反对', info, flipped)
         return _fin(result, 'WATCHLIST', '翻转·价格确认', info, flipped)
     if euro_v == '反对':
         return _fin(result, 'PASS', '共识否决：欧赔反对', info)
     if euro_v == '中性':
         return _fin(result, 'WATCHLIST', '共识中立', info)
+    # 方向过弱：仅一家变盘，即便欧赔支持、价格合理，也不值得EXECUTE
+    if qual == '偏弱':
+        return _fin(result, 'WATCHLIST', '方向偏弱：仅单家变盘', info)
     if bc_level in ('过热', '关注'):
         return _fin(result, 'WATCHLIST', f'BC{bc_level}：{bc_reason}', info, flipped)
     return _fin(result, 'EXECUTE', '方向明确·共识支持·价格确认', info)
@@ -1067,7 +1077,7 @@ def _parse_md(text):
                         bk = 'William Hill'
                     elif 'Bet365' in bk or 'bet365' in bk:
                         bk = 'Bet365'
-                    elif 'singbet' in bk:
+                    elif 'singbet' in bk or '皇冠' in bk or 'sbobet' in bk.lower() or 'Sbobet' in bk:
                         bk = 'singbet'
                     elif '澳门' in bk:
                         bk = '澳门彩票'
