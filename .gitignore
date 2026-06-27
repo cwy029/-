@@ -4,3 +4,6 @@ __pycache__/
 .recovery/
 *.bak
 .env.json
+
+# Local archive data
+archive/
