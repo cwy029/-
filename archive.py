@@ -20,7 +20,8 @@ from datetime import datetime
 from pathlib import Path
 
 BASE = Path(__file__).parent
-ARCHIVE = BASE / 'archive'
+# 赔率存档放在共享目录，避免随 GitHub 仓库公开
+ARCHIVE = Path('/var/minis/shared/六扇门_archive')
 INPUTS = ARCHIVE / 'inputs'
 OUTPUTS = ARCHIVE / 'outputs'
 RESULTS = ARCHIVE / 'results'
