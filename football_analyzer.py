@@ -1056,6 +1056,8 @@ def _parse_md(text):
                     section = 'ou'
                 elif l2.startswith('## '):
                     break
+                elif re.match(r'^#+\s+\S+.*vs\.?\s+\S+', l2, re.IGNORECASE):
+                    break
                 elif l2.startswith('|') and '---' not in l2 and section:
                     cols = [c.strip() for c in l2.split('|')[1:-1]]
                     if len(cols) < 5:
