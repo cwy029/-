@@ -44,18 +44,20 @@ version: 8.0.0
    追价 ≥3家 → Expensive；否则 → Fair（只描述，不判断价值）
        ↓
 ④ Risk Filter（风控否决）
-   R1 诱盘：方向方低水<1.80且未升盘 → WATCHLIST
-   R2 兑现：让球方方向但大小球退盘 ≥0.25 → WATCHLIST
-   R3 弱方向+偏贵：active≤1且偏贵 → PASS
-   R4 结构冲突：Pin vs 365方向相反 → PASS
-   R5 皇冠逆多数：皇冠与Pin/365同向时相反 → PASS
-   R6 成熟市场：全庄线位水位一致 → BC4反证「无信息边际」↓
+   R3 价格否决：偏贵 + 方向弱（多数未追价）→ PASS
+   R4 结构冲突：Pin vs 365 方向相反 → PASS
+   R5 皇冠逆多数：Pin/365同向但皇冠相反 → PASS
+   ⚠️ 只有三条铁律，R1/R2/R6已移除
        ↓
 ⑤ Bookmaker Challenge（庄家反证）
-   BC1 软庄避险：365/皇冠均值低于Pin≥0.05 → Against
-   输出：Support / Against
+   BC1～BC4 四道交叉检查
+   输出：无异议 / 关注 / 过热
        ↓
-⑥ Final Decision
+⑥ Final Decision（最终决策前，必问一句）
+   庄家最舒服的结果是什么？我买的方向跟庄家一致吗？
+   ⚠️ 如果一致 → 方向很可能错了（庄家不会让你跟他一起舒服）
+   ✅ 如果不一致 → 方向可能对（你在跟庄家对赌）
+   答完这个问题，再看结论：
    EXECUTE / WATCHLIST / PASS
 ```
 
