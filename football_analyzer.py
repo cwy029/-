@@ -909,6 +909,19 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
                     settle = '—'
             
             items.append(f'  | {label_text:6s}| {ah_short:12s}| {ou_short:12s}| {settle}')
+        
+        # 庄家最舒服的比分总结
+        if dir_on_fav:
+            # 最舒服：方向方赢球但不够穿盘 + 小球
+            # 穿盘线 = ab球（整数盘）或 ab-0.25球（非整数盘）
+            non_cover_max = int(ab) - (1 if quarter == 0 else 1)
+            if non_cover_max < 1:
+                non_cover_max = 1
+            # 总进球低于大小球线
+            ou_target = int(ou_ln) - 1 if ou_ln >= 2 else 1
+            if ou_target < 1:
+                ou_target = 1
+            items.append(f'  庄家最舒服比分：{team} 赢 {non_cover_max}-{ou_target} 球（AH全收散户穿盘注，大小球收小球注）')
 
     return '', items
 
