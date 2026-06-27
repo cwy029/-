@@ -811,6 +811,55 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
         for s in settlement[:3]:
             items.append(f'结算：{s}')
 
+    # ── 综合赔付结构（亚盘+大小球对照） ──
+    # 取 Pin 大小球线位作为参考
+    pin_ou = None
+    for bk in ['Pinnacle']:
+        cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+        if cc:
+            pin_ou = _fl(cc.get('line'))
+    if pin_ou is not None and curr_pin is not None and dir_on_fav:
+        ou_ln = pin_ou
+        payout = []
+        # 让球方：展示赢 2 个整数球门的对照
+        for win_diff in [1, 2, 3]:
+            g = ab + win_diff - 1  # win_diff=1时g=ab, win_diff=2时g=ab+1, win_diff=3时g=ab+2
+            if g < 1:
+                continue
+            g = round(g, 2)
+            # 大小球
+            if g > ou_ln:
+                ou_r = '大球'
+            elif g < ou_ln:
+                ou_r = '小球'
+            else:
+                ou_r = '走水'
+            # 亚盘
+            if quarter == 0:
+                if g > ab:
+                    ah_r = '全收'
+                elif g == ab:
+                    ah_r = '走水'
+                else:
+                    ah_r = '全输'
+            elif quarter == 2:
+                if g >= ab + 0.25:
+                    ah_r = '全收'
+                elif g >= ab - 0.25:
+                    ah_r = '输半'
+                else:
+                    ah_r = '全输'
+            else:
+                if g >= ab + 0.25:
+                    ah_r = '全收'
+                elif g >= ab - 0.25:
+                    ah_r = '输半'
+                else:
+                    ah_r = '全输'
+            payout.append(f'{team} 赢 {_fmt(g)} 球 → AH{ah_r} / OU{ou_r}')
+        if payout:
+            items.append('赔付：' + ' | '.join(payout[:3]))
+
     return '', items
 
 
