@@ -1538,11 +1538,11 @@ def analyze(name, mkt):
     info.append(f'{price_label}（{price_d}）')
     verdicts.append(f'价格{price_label}')
 
-    # ── 盘口管理分析 ──
-    if dir_ah is not None:
-        best_line, bal_items = bookmaker_balance(mkt, dir_ah, flipped, name)
-        result['盘口管理'] = bal_items
-        result['_best_line'] = best_line
+    # ── 盘口管理分析（始终执行，无方向时用主队方向） ──
+    _bal_dir = dir_ah if dir_ah is not None else '+'
+    best_line, bal_items = bookmaker_balance(mkt, _bal_dir, flipped, name)
+    result['盘口管理'] = bal_items
+    result['_best_line'] = best_line if dir_ah is not None else ''
 
     # ── 庄家反证（Bookmaker Challenge）──
     bc_level, bc_reason = bookmaker_challenge(mkt, dir_ah, active if dir_ah else 0, price_v, euro_v)
@@ -2070,33 +2070,49 @@ def _print(r, name):
 
     lines.append('')
 
-    # ── 🎯 盘口交易员判断（强制 Q1-Q4 + 判断） ──
+    # ── 🎯 盘口交易员判断（强制 Q1-Q4，数据源：庄家平衡） ──
     lines.append('━━━ 🎯 盘口交易员判断（强制 Q1-Q4）━━━')
     ta = r.get('交易决策', {})
     val = ta.get('value', '') if ta else ''
     jdg = ta.get('judgment', '') if ta else ''
     if val:
         lines.append(f'  📊 {val}')
-    # 强制从庄家平衡提取 Q1-Q4 数据，不引用系统结论
+
     bal = r.get('盘口管理', [])
-    _tools = [b for b in bal if '推盘' in b or '退盘' in b or '升水' in b or '降水' in b]
-    _line_item = next((b for b in bal if '=' in b and '盘' in b), '')
-    _flaws = r.get('破绽', [])
-    _line = r.get('_best_line', '')
-    _sig = r.get('信号', '')
-    _price = r.get('价格', '—')
-    _water = ''
+
+    # Q1: AH线位变动 → 市场共识（排除大小球行）
+    _line_moves = [b for b in bal if ('推盘' in b or '退盘' in b) and '大小球' not in b]
+    _line_summary = '；'.join(_line_moves) if _line_moves else 'AH无线位变动'
+
+    # Q2: 水位变动细节（仅AH水位，排除大小球）
+    _water_moves = [b for b in bal if ('升0' in b or '降0' in b) and ('Pin' in b or '365' in b or 'Crown' in b) and '大小球' not in b]
+    _water_detail = '；'.join(_water_moves[:2]) if _water_moves else '无水位变动'
+
+    # Q3: 方向方是否在让利（水全面上升=偏贵）
+    _fav_up = sum(1 for b in bal if '升水' in b and ('Pin' in b or '365' in b or 'Crown' in b))
+    _price_warn = '⚠ 方向方水上升=偏贵信号' if _fav_up >= 2 else '方向方水未全面上升'
+
+    # Q4: 极端值 + 分歧 + 诱导
+    _q4_parts = []
+    if any('分歧' in b for b in bal):
+        _q4_parts.append('⚠ 跨庄分歧')
     for b in bal:
-        if '升0' in b or '降0' in b:
-            _water = b
-            break
+        if '涨0.' in b or '降0.' in b:
+            try:
+                s = b.split('涨0.')[1].split('(')[0].strip() if '涨0.' in b else ''
+                if not s and '降0.' in b:
+                    s = b.split('降0.')[1].split('(')[0].strip()
+                if s and float(s) >= 0.30:
+                    _q4_parts.append('⚠ 极端水位(≥0.30)')
+            except: pass
+    if any('诱' in b for b in bal):
+        _q4_parts.append('⚠ 诱导信号')
+    _q4 = '；'.join(_q4_parts) if _q4_parts else '无'
 
-    lines.append(f'  Q1 方向投票：{_sig}  |  参考盘口：{_line}')
-    lines.append(f'  Q2 盘口/水位：{_tools[0] if _tools else "无线位变动"}  |  {_water}')
-    lines.append(f'  Q3 价格：{_price}  {"⚠ 方向方水全升=偏贵信号" if sum(1 for b in bal if "升水" in b) >= 2 else ""}')
-    lines.append(f'  Q4 异常：{"、".join(_flaws) if _flaws else "无"}')
-
-    # 纪律提示
+    lines.append(f'  Q1 线位共识：{_line_summary}')
+    lines.append(f'  Q2 水位变化：{_water_detail}')
+    lines.append(f'  Q3 价格信号：{_price_warn}')
+    lines.append(f'  Q4 异常检测：{_q4}')
     lines.append(f'')
     lines.append(f'  ⛔ 先过 Q1-Q4，再出判断，不跳步不预判')
 
