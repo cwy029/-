@@ -1405,20 +1405,19 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         if '推盘' in q1 and '降水' in q1 and '降赔' in q1 and price_v != '偏贵':
             ah_prod = f'{team}{_fmt_line(bl, dir_ah)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
             ah_side = team
-            ah_reason = '三线同步，跟方向方'
+            ah_reason = f'庄家推盘+方向方降水+欧赔降赔，三线同步确认方向方定价，市场共识强化'
         elif '推盘' in q1 and '升水' in q1:
             ah_prod = f'{opp}{_fmt_line(bl, "+" if dir_ah == "-" else "-") if bl else ""}'
             ah_side = opp
-            ah_reason = '推盘+升水让利，诱方向方，反打对方'
+            ah_reason = f'庄家推盘但主动升水，让利吸引方向方资金流入，真实意图更倾向于对方'
         elif '平赔降' in q1 or '平赔骤降' in q1:
-            # 平赔降：方向方风险上升
             ah_prod = f'{opp}{_fmt_line(bl, "+" if dir_ah == "-" else "-") if bl else ""}'
             ah_side = opp
-            ah_reason = '平赔降，方向方风险'
+            ah_reason = f'庄家平赔全线下降，大量承接平局资金，方向方赢面受压'
         elif price_v == '合理' or price_v == '偏便宜':
             ah_prod = f'{team}{_fmt_line(bl, dir_ah)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
             ah_side = team
-            ah_reason = '价格合理，跟方向方'
+            ah_reason = f'庄家未对方向方追价，当前盘口价格处于均衡区间'
 
         # ── 交易员独立检查极端水位变动（不依赖 check_ou 阈值）──
         extreme_override = None
@@ -1438,26 +1437,29 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         # ── 融合 AH + OU ──
         if ah_side and ou_has_signal:
             ou_label = '大球' if ou_dir == '大球' else '小球'
-            # 交易员独立判断：极端水位覆写
             if extreme_override and extreme_override != ou_dir:
-                ou_reason = f'水位异常（极端{extreme_override}信号），覆盖系统多数判{ou_label}，交易员独立改看{extreme_override}'
+                ou_reason = f'庄家{extreme_override}方向水位异常波动（≥0.30），市场价格被资金穿透，优先跟随水位方向'
                 ou_label = extreme_override
                 ou_dir = extreme_override
-                # 重建 OU 产品
                 ou_order = '大' if ou_dir == '大球' else '小'
                 ou_water = ou_over if ou_dir == '大球' else ou_under
                 ou_prod = f'{ou_order}{_fmt(ou_line)} @{ou_water:.2f} ({ou_bk})' if ou_water and ou_line else '-'
             elif extreme_override:
-                ou_reason = f'真{ou_label}信号（水位异常确认）'
+                ou_reason = f'庄家{ou_label}方向水位异常确认，资金配合线位方向一致'
             elif '诱盘' in (ou_desc or ''):
                 if '大球水升' in ou_desc:
-                    ou_reason = f'少数认为诱大球，多数看{ou_label}'
+                    ou_reason = f'庄家升盘配合大球水升，市场在诱导大球方向，实际应看小球'
                 elif '小球水升' in ou_desc:
-                    ou_reason = f'少数认为诱小球，多数看{ou_label}'
+                    ou_reason = f'庄家退盘配合小球水升，市场在诱导小球方向，实际应看大球'
                 else:
-                    ou_reason = f'存在分歧，多数看{ou_label}'
+                    ou_reason = f'庄家盘口与水位配合存在诱导信号，需谨慎'
             else:
-                ou_reason = f'真{ou_label}信号'
+                if '大球水降' in ou_desc or '大球水降' in ou_desc:
+                    ou_reason = f'庄家主动降低大球水位，真实看好大球方向'
+                elif '小球水降' in ou_desc or '小球水降' in ou_desc:
+                    ou_reason = f'庄家主动降低小球水位，真实看好小球方向'
+                else:
+                    ou_reason = f'庄家{ou_label}方向信号明确'
             product = f'{ah_prod} + {ou_prod}'
             size = 'AH 10-15%, OU 5-10%'
             trade_side = f'{ah_side} + {ou_label}'
@@ -1470,20 +1472,20 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         elif ou_has_signal:
             ou_label = '大球' if ou_dir == '大球' else '小球'
             if extreme_override and extreme_override != ou_dir:
-                ou_reason = f'水位异常（极端{extreme_override}信号），覆盖系统多数判{ou_label}，交易员独立改看{extreme_override}'
+                ou_reason = f'庄家{extreme_override}方向水位异常波动（≥0.30），市场价格被资金穿透，优先跟随水位方向'
                 ou_label = extreme_override
                 ou_dir = extreme_override
             elif extreme_override:
-                ou_reason = f'真{ou_label}信号（水位异常确认）'
+                ou_reason = f'庄家{ou_label}方向水位异常确认，资金配合线位方向一致'
             elif '诱盘' in (ou_desc or ''):
                 if '大球水升' in ou_desc:
-                    ou_reason = f'少数认为诱大球，多数看{ou_label}'
+                    ou_reason = f'庄家升盘配合大球水升，市场在诱导大球方向，实际应看小球'
                 elif '小球水升' in ou_desc:
-                    ou_reason = f'少数认为诱小球，多数看{ou_label}'
+                    ou_reason = f'庄家退盘配合小球水升，市场在诱导小球方向，实际应看大球'
                 else:
-                    ou_reason = f'存在分歧，多数看{ou_label}'
+                    ou_reason = f'庄家盘口与水位配合存在诱导信号，需谨慎'
             else:
-                ou_reason = f'真{ou_label}信号'
+                ou_reason = f'庄家{ou_label}方向信号明确'
             product = ou_prod
             size = '10-15%'
             trade_side = ou_dir
@@ -1491,15 +1493,6 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         else:
             trade_side = 'PASS'
             reason = '盘口证据不足以支撑明确交易，PASS'
-
-    # 追加合拍度/破绽到原因（来自第二层）
-    fit_str = assess.get('fit', '')
-    flaw_str = '；'.join(assess.get('flaws', [])) if assess.get('flaw') else ''
-    if fit_str and reason and reason != '盘口证据不足，禁止猜测':
-        reason += f'（合拍度：{fit_str}'
-        if flaw_str:
-            reason += f'，破绽：{flaw_str}'
-        reason += '）'
 
     return {
         'q1': q1,
@@ -1690,7 +1683,6 @@ def analyze(name, mkt):
 
     # 第三层：交易员决策（严格按 TRADING_FLOW.md 框架，无框架不输出）
     trading = trader_analysis(mkt, dir_ah, system_conc, price_v, name)
-    trader_tag = '同向' if trading.get('product', '-') != '-' else '独立'
     info.append(f'交易员独立判断：{trading["reason"]}')
 
     return _fin(result, system_conc, system_reason, info, flipped, trading)
