@@ -2088,16 +2088,25 @@ def _print(r, name):
     _water_moves = [b for b in bal if ('升0' in b or '降0' in b) and ('Pin' in b or '365' in b or 'Crown' in b) and '大小球' not in b]
     _water_detail = '；'.join(_water_moves[:2]) if _water_moves else '无水位变动'
 
-    # Q3: 方向方是否在让利（水全面上升=偏贵）
+    # Q3: 方向方水位检查（3/3=全面偏贵，2/3=分化，0-1/3=正常）
     _fav_up = 0
+    _fav_down = 0
     for b in bal:
         if 'Pin' in b or '365' in b or 'Crown' in b:
-            if '升0.' in b or '升水' in b:
-                # 统计有多少家升水：Pin/365/Crown 分别检查
-                for bk in ['Pin', '365', 'Crown']:
-                    if f'{bk}升' in b:
-                        _fav_up += 1
-    _price_warn = '⚠ 方向方水上升=偏贵信号' if _fav_up >= 2 else '方向方水未全面上升'
+            for bk in ['Pin', '365', 'Crown']:
+                if f'{bk}升' in b:
+                    _fav_up += 1
+                elif f'{bk}降' in b:
+                    _fav_down += 1
+    _total = _fav_up + _fav_down
+    if _fav_up >= 3:
+        _price_warn = '⚠ 方向方水全面上升=偏贵信号'
+    elif _fav_up >= 2 and _fav_down >= 1:
+        _price_warn = '⚠ 方向方水位分化（升水为主）'
+    elif _fav_up == 2:
+        _price_warn = '⚠ 方向方水上升=偏贵信号'
+    else:
+        _price_warn = '方向方水未全面上升'
 
     # Q4: 极端值 + 分歧 + 诱导
     _q4_parts = []
