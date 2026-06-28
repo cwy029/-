@@ -1754,8 +1754,8 @@ def _parse_md(text):
             if ' vs ' not in name and ' VS ' in name:
                 name = name.replace(' VS ', ' vs ')
 
-        # 对阵信息行：- **对阵**: 哥伦比亚 vs 葡萄牙
-        m_vs_info = re.search(r'[-\*]*\s*\*?\*?\s*对阵\s*\*?\*?\s*[：:]\s*(.+?)\s*$', l)
+        # 对阵信息行：- **对阵**: 哥伦比亚 vs 葡萄牙 / - **对阵双方**: 哥伦比亚 vs 葡萄牙
+        m_vs_info = re.search(r'[-\*]*\s*\*?\*?\s*对阵(?:双方)?\s*\*?\*?\s*[：:]\s*(.+?)\s*$', l)
         if m_vs_info and 'vs' in m_vs_info.group(1).lower():
             name = m_vs_info.group(1).strip()
             name = re.sub(r'\s*\[\d+\]', '', name)
@@ -1862,9 +1862,10 @@ def _parse_md(text):
                                 curr[bk]['Spread'] = {'1': {'line': curr_hcp, 'home': curr_hw, 'away': curr_aw}}
 
                     elif section == 'ou':
-                        # 大小球：同样支持两种列顺序
-                        # 格式A: 机构 | 界线 | 大球 | 小球 | 界线 | 大球 | 小球
-                        # 格式B: 机构 | 大球 | 界线 | 小球 | 大球 | 界线 | 小球
+                        # 大小球：支持三种列顺序
+                        # 格式A: 机构 | 界线 | 大球 | 小球 | 界线 | 大球 | 小球 (7列)
+                        # 格式B: 机构 | 大球 | 界线 | 小球 | 大球 | 界线 | 小球 (7列)
+                        # 格式C: 机构 | 大球 | 小球 | 大球 | 小球 (5列, 无线位列)
                         if len(cols) >= 7:
                             snap.setdefault(bk, {})
                             curr.setdefault(bk, {})
@@ -1891,10 +1892,23 @@ def _parse_md(text):
                                 curr_ln = _fl(cols[4])
                                 curr_ov = _fl(cols[5])
                                 curr_ud = _fl(cols[6])
-                            if snap_ln is not None:
+                            if snap_ln is not None or snap_ov is not None:
                                 snap[bk]['Totals'] = {'1': {'line': snap_ln, 'home': snap_ov, 'under': snap_ud}}
-                            if curr_ln is not None:
+                            if curr_ln is not None or curr_ov is not None:
                                 curr[bk]['Totals'] = {'1': {'line': curr_ln, 'home': curr_ov, 'under': curr_ud}}
+
+                        # 格式C: 5列时，盘口从标题提取（如 "大小球 (2.25球)"）
+                        elif len(cols) >= 5:
+                            snap.setdefault(bk, {})
+                            curr.setdefault(bk, {})
+                            snap_ov = _fl(cols[1])
+                            snap_ud = _fl(cols[2])
+                            curr_ov = _fl(cols[3])
+                            curr_ud = _fl(cols[4])
+                            if snap_ov is not None:
+                                snap[bk]['Totals'] = {'1': {'line': None, 'home': snap_ov, 'under': snap_ud}}
+                            if curr_ov is not None:
+                                curr[bk]['Totals'] = {'1': {'line': None, 'home': curr_ov, 'under': curr_ud}}
 
                 j += 1
 
