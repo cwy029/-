@@ -26,21 +26,21 @@ BK_LABEL = {'Pinnacle': 'Pin', 'Bet365': '365', 'singbet': 'Crown',
 BK_FULL = {'Pinnacle': 'Pinnacle', 'Bet365': 'Bet365', 'singbet': 'Crown',
            '澳门彩票': '澳门彩票'}
 
-def _fl(v):
+def _fl(v, water=True):
+    """数值解析，自动 HK→EU 转换
+    water=True: 水位值，0.50~1.50 范围且非 0.25 倍数时加 1.0（HK→EU）
+    water=False: 非水位（欧赔/线位），直接返回
+    """
     if v is None:
         return None
     v = str(v).strip()
-    # 去掉 (↑) (↓) 等升降标记
     if '(' in v:
         v = v[:v.index('(')].strip()
-    # 去掉尾部升降箭头（如 1.98 ↓）
     v = re.sub(r'\s*[↑↓]+\s*$', '', v).strip()
     if not v:
         return None
     val = float(v)
-    # HK→EU 自动转换：水位类数值（0.50~1.50）加 1.0
-    # 但盘口线位（0.25, 0.5, 0.75, 1.0...）是 0.25 的整数倍，不转换
-    if 0.50 < val < 1.50 and ((val * 4) % 1) != 0:
+    if water and 0.50 < val < 1.50 and ((val * 4) % 1) != 0:
         val = round(val + 1.0, 2)
     return val
 
@@ -180,8 +180,8 @@ def euro_verdict(bk, mkt, dir_ah):
     if not snap_ml or not curr_ml:
         return None
     fav = 'home' if dir_ah == '+' else 'away'
-    snap_o = _fl(snap_ml.get(fav))
-    curr_o = _fl(curr_ml.get(fav))
+    snap_o = _fl(snap_ml.get(fav), water=False)
+    curr_o = _fl(curr_ml.get(fav), water=False)
     if not snap_o or not curr_o:
         return None
     chg = (snap_o - curr_o) / snap_o
@@ -289,8 +289,8 @@ def check_draw_signal(mkt, dir_ah):
         c_ml = _gm(bk, mkt['curr'])
         if not s_ml or not c_ml:
             continue
-        ds = _fl(s_ml.get('draw'))
-        dc = _fl(c_ml.get('draw'))
+        ds = _fl(s_ml.get('draw'), water=False)
+        dc = _fl(c_ml.get('draw'), water=False)
         if ds and dc and (ds - dc) / ds >= 0.04:
             drop_count += 1
     if drop_count >= 3:
@@ -518,8 +518,8 @@ def check_draw_drop(mkt):
         c_ml = _gm(bk, mkt['curr'])
         if not s_ml or not c_ml:
             continue
-        ds = _fl(s_ml.get('draw'))
-        dc = _fl(c_ml.get('draw'))
+        ds = _fl(s_ml.get('draw'), water=False)
+        dc = _fl(c_ml.get('draw'), water=False)
         if ds and dc:
             if dc < ds:
                 count += 1
@@ -862,8 +862,8 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
         c_ml = _gm(bk, mkt.get('curr', {}))
         if not s_ml or not c_ml:
             continue
-        ds = _fl(s_ml.get('draw'))
-        dc = _fl(c_ml.get('draw'))
+        ds = _fl(s_ml.get('draw'), water=False)
+        dc = _fl(c_ml.get('draw'), water=False)
         if ds and dc:
             dchg = (ds - dc) / ds
             if abs(dchg) >= 0.03:
@@ -1092,8 +1092,8 @@ def _describe_bookmaker_action(mkt, dir_ah):
         s_ml = _gm(bk, mkt.get('snap', {}))
         c_ml = _gm(bk, mkt.get('curr', {}))
         if s_ml and c_ml:
-            ds = _fl(s_ml.get('draw'))
-            dc = _fl(c_ml.get('draw'))
+            ds = _fl(s_ml.get('draw'), water=False)
+            dc = _fl(c_ml.get('draw'), water=False)
             if ds and dc:
                 if dc > ds * 1.03:
                     draw_up += 1
@@ -1254,8 +1254,8 @@ def evaluate_fit_and_flaw(mkt, dir_ah):
         s_ml = _gm(bk, mkt.get('snap', {}))
         c_ml = _gm(bk, mkt.get('curr', {}))
         if s_ml and c_ml:
-            ds = _fl(s_ml.get('draw'))
-            dc = _fl(c_ml.get('draw'))
+            ds = _fl(s_ml.get('draw'), water=False)
+            dc = _fl(c_ml.get('draw'), water=False)
             if ds and dc:
                 if dc > ds * 1.03:
                     draw_up += 1
@@ -1375,9 +1375,9 @@ def _kelly(decimal_odds, assessed_prob):
 def value_assessment(mkt, t_dir):
     for bk in ['Pinnacle']:
         ml = mkt.get('curr', {}).get(bk, {}).get('ML', {}).get('1', {})
-        home = _fl(ml.get('home'))
-        draw = _fl(ml.get('draw'))
-        away = _fl(ml.get('away'))
+        home = _fl(ml.get('home'), water=False)
+        draw = _fl(ml.get('draw'), water=False)
+        away = _fl(ml.get('away'), water=False)
         if home and draw and away:
             probs, margin = _implied_prob([home, draw, away])
             if probs:
@@ -1745,8 +1745,8 @@ def _parse_md(text):
                             snap.setdefault(bk, {})
                             curr.setdefault(bk, {})
                             try:
-                                snap_ml = {'home': _fl(cols[1]), 'draw': _fl(cols[2]), 'away': _fl(cols[3])}
-                                curr_ml = {'home': _fl(cols[4]), 'draw': _fl(cols[5]), 'away': _fl(cols[6])}
+                                snap_ml = {'home': _fl(cols[1], water=False), 'draw': _fl(cols[2], water=False), 'away': _fl(cols[3], water=False)}
+                                curr_ml = {'home': _fl(cols[4], water=False), 'draw': _fl(cols[5], water=False), 'away': _fl(cols[6], water=False)}
                                 snap[bk]['ML'] = {'1': snap_ml}
                                 curr[bk]['ML'] = {'1': curr_ml}
                             except:
@@ -1856,8 +1856,8 @@ def _normalize_ah_lines(mkt):
     for bk_data in [curr, snap]:
         for bk, v in bk_data.items():
             ml = v.get('ML', {}).get('1', {})
-            h = _fl(ml.get('home'))
-            a = _fl(ml.get('away'))
+            h = _fl(ml.get('home'), water=False)
+            a = _fl(ml.get('away'), water=False)
             if h and a:
                 inferred = h < a
                 if ml_fav_is_home is None:
@@ -2082,7 +2082,7 @@ def _print(r, name):
         if val:
             lines.append(f'')
             lines.append(f'  ── 价值评估 ──')
-            lines.append(f'  📊 市场概率：{val}')
+            lines.append(f'  📊 {val}')
         jdg = ta.get('judgment', '')
         if jdg:
             lines.append(f'')
