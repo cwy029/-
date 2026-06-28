@@ -37,7 +37,12 @@ def _fl(v):
     v = re.sub(r'\s*[↑↓]+\s*$', '', v).strip()
     if not v:
         return None
-    return float(v)
+    val = float(v)
+    # HK→EU 自动转换：水位类数值（0.50~1.50）加 1.0
+    # 但盘口线位（0.25, 0.5, 0.75, 1.0...）是 0.25 的整数倍，不转换
+    if 0.50 < val < 1.50 and ((val * 4) % 1) != 0:
+        val = round(val + 1.0, 2)
+    return val
 
 
 def _ql(v):
