@@ -1346,8 +1346,12 @@ def evaluate_fit_and_flaw(mkt, dir_ah):
     }
 
 
+# 交易员手动判断（由用户在对话中设定，下次运行前写入）
+TRADER_JUDGMENT = ''
+
 def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
-    """第三层：盘口交易员视角 — 只输出Q1-Q4分析数据，不做自动决策。"""
+    """第三层：盘口交易员视角 — 输出Q1-Q4数据 + 人工判断。"""
+    global TRADER_JUDGMENT
     home_name = name.split(' vs ')[0].strip()
     away_name = name.split(' vs ')[1].strip()
     t_dir = dir_ah if dir_ah else '+'
@@ -1359,6 +1363,9 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
     comfort_score, comfort_ou = _comfortable_outcome(mkt, t_dir, name)
     q4 = f'{comfort_score[0]}-{comfort_score[1]}（AH收方向注，{comfort_ou}）' if comfort_score else '无法判断'
 
+    jdg = TRADER_JUDGMENT
+    TRADER_JUDGMENT = ''  # 用完重置
+
     return {
         'q1': q1,
         'q2': q2,
@@ -1368,6 +1375,7 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         'product': '-',
         'size': '0%',
         'reason': '交易员数据已输出Q1-Q4，请人工判断',
+        'judgment': jdg,
     }
 
 
@@ -1884,9 +1892,20 @@ def _log_match(r, name):
 
 def main():
     import os, datetime
-    if len(sys.argv) > 1:
-        # 尝试 JSON，失败则尝试 Markdown
-        with open(sys.argv[1]) as f:
+    # 检查 --judgment 参数
+    global TRADER_JUDGMENT
+    jd_arg = None
+    filtered = []
+    for a in sys.argv[1:]:
+        if a.startswith('--judgment='):
+            jd_arg = a.split('=', 1)[1]
+        else:
+            filtered.append(a)
+    if jd_arg:
+        TRADER_JUDGMENT = jd_arg.replace('\\n', '\n')
+
+    if filtered:
+        with open(filtered[0]) as f:
             raw = f.read()
         try:
             data = json.loads(raw)
@@ -2001,14 +2020,19 @@ def _print(r, name):
 
     lines.append('')
 
-    # ── 🎯 盘口交易员视角（Q1-Q4 数据，供人工判断） ──
-    lines.append('━━━ 🎯 盘口交易员视角（Q1-Q4 数据）━━━')
+    # ── 🎯 盘口交易员视角（Q1-Q4 数据 + 人工判断） ──
+    lines.append('━━━ 🎯 盘口交易员视角（Q1-Q4 数据 + 人工判断）━━━')
     ta = r.get('交易决策', {})
     if ta:
         lines.append(f'  Q1 庄家现在在干什么？   {ta.get("q1", "")}')
         lines.append(f'  Q2 庄家为什么这样定价？ {ta.get("q2", "")}')
         lines.append(f'  Q3 庄家承担哪边风险？   {ta.get("q3", "")}')
         lines.append(f'  Q4 哪个结果最符合庄家赔付利益？ {ta.get("q4", "")}')
+        jdg = ta.get('judgment', '')
+        if jdg:
+            lines.append(f'')
+            lines.append(f'  🧑‍💼 我的判断：')
+            lines.append(f'  {jdg}')
 
     for l in lines:
         print(l)
