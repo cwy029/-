@@ -40,6 +40,19 @@ def _fl(v):
     return float(v)
 
 
+def _ql(v):
+    """解析大小球盘口：'2/2.5' -> 2.25, '2.5/3' -> 2.75"""
+    if v is None: return None
+    v = str(v).strip()
+    if '/' in v:
+        parts = v.split('/')
+        try:
+            a, b = float(parts[0]), float(parts[1])
+            return round((a + b) / 2, 2)
+        except: pass
+    return _fl(v)
+
+
 def _ld(ol, cl):
     if ol is None or cl is None:
         return None
@@ -1714,6 +1727,10 @@ _HANDICAP = {
     '两球': -2.0, '两球/两球半': -2.25, '两球/半': -2.25,
     '两球半': -2.5, '两球半/三球': -2.75, '两半/三': -2.75,
     '三球': -3.0, '三球/三球半': -3.25, '三球半': -3.5, '三球半/四球': -3.75, '四球': -4.0,
+    # 数值格式
+    '-0/0.5': -0.25, '-0.5': -0.5, '-0.75': -0.75, '-1': -1.0, '-1.25': -1.25, '-1.5': -1.5,
+    '-1.75': -1.75, '-2': -2.0, '-2.25': -2.25, '-2.5': -2.5,
+    '0': 0.0, '0/0.5': -0.25, '0.5': -0.5, '0.75': -0.75,
 }
 
 
@@ -1775,11 +1792,11 @@ def _parse_md(text):
                 l2 = lines[j].strip()
 
                 # 检测章节
-                if '欧指' in l2 or '欧赔' in l2:
+                if '欧指' in l2 or '欧赔' in l2 or '胜平负' in l2:
                     section = 'ml'
-                elif '亚指' in l2 or '亚盘' in l2 or '让球' in l2:
+                elif '亚指' in l2 or '亚盘' in l2 or '让球' in l2 or 'Handicap' in l2:
                     section = 'ah'
-                elif '大小球' in l2 or '大小' in l2:
+                elif '大小球' in l2 or '大小' in l2 or '总进球' in l2 or 'Over/Under' in l2:
                     section = 'ou'
                 elif l2.startswith('## '):
                     break
@@ -1802,15 +1819,15 @@ def _parse_md(text):
 
                     bk = cols[0]
                     # 标准化庄家名
-                    if '威廉' in bk:
+                    if '威廉' in bk or '威*' in bk or '威*(' in bk:
                         bk = 'William Hill'
-                    elif 'Bet365' in bk or 'bet365' in bk:
+                    elif 'Bet365' in bk or 'bet365' in bk or '36*' in bk:
                         bk = 'Bet365'
-                    elif 'singbet' in bk or '皇冠' in bk or 'Crown' in bk or 'sbobet' in bk.lower():
+                    elif 'singbet' in bk or '皇冠' in bk or 'Crown' in bk or 'Crow*' in bk or 'sbobet' in bk.lower():
                         bk = 'singbet'
-                    elif '澳门' in bk:
+                    elif '澳门' in bk or '澳*' in bk:
                         bk = '澳门彩票'
-                    elif 'Pinnacle' in bk or '平博' in bk or 'Pin' in bk:
+                    elif 'Pinnacle' in bk or '平博' in bk or 'Pin' in bk or '平*' in bk or 'Pinna' in bk:
                         bk = 'Pinnacle'
 
                     if section == 'ml':
@@ -1879,17 +1896,17 @@ def _parse_md(text):
                             if is_fmt_b:
                                 # 格式B: 大 界 小 | 大 界 小
                                 snap_ov = _fl(cols[1])
-                                snap_ln = _fl(cols[2])
+                                snap_ln = _ql(cols[2])
                                 snap_ud = _fl(cols[3])
                                 curr_ov = _fl(cols[4])
-                                curr_ln = _fl(cols[5])
+                                curr_ln = _ql(cols[5])
                                 curr_ud = _fl(cols[6])
                             else:
                                 # 格式A: 界 大 小 | 界 大 小
-                                snap_ln = _fl(cols[1])
+                                snap_ln = _ql(cols[1])
                                 snap_ov = _fl(cols[2])
                                 snap_ud = _fl(cols[3])
-                                curr_ln = _fl(cols[4])
+                                curr_ln = _ql(cols[4])
                                 curr_ov = _fl(cols[5])
                                 curr_ud = _fl(cols[6])
                             if snap_ln is not None or snap_ov is not None:
