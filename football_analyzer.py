@@ -1347,82 +1347,11 @@ def evaluate_fit_and_flaw(mkt, dir_ah):
 
 
 def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
-    """
-    第三层：盘口交易员视角。
-    强制回答四个问题，最后给出庄家视角的交易建议。
-    证据不足 → 推荐 PASS。
-    独立于系统结论：即使系统无方向(dir_ah=None)，交易员仍可自行判断。
-    """
+    """第三层：盘口交易员视角 — 只输出Q1-Q4分析数据，不做自动决策。"""
     home_name = name.split(' vs ')[0].strip()
     away_name = name.split(' vs ')[1].strip()
+    t_dir = dir_ah if dir_ah else '+'
 
-    # ── 交易员自行确定方向（不依赖系统）──
-    # 综合线位投票 + 水位偏移投票
-    sigs = {}
-    for bk in BK_CORE:
-        snap_ln = _fl(_gs(bk, mkt['snap']).get('line'))
-        curr_ln = _fl(_gs(bk, mkt['curr']).get('line'))
-        sigs[bk] = sgn(_ld(snap_ln, curr_ln))
-    vf = sum(1 for s in sigs.values() if s == '+')
-    va = sum(1 for s in sigs.values() if s == '-')
-
-    # 水位偏移投票：线位不动但水位大幅倾斜，视为隐性信号
-    for bk in BK_CORE:
-        if sigs[bk] != '0':
-            continue  # 有线位变化的已经投票
-        snap_s = _gs(bk, mkt['snap'])
-        curr_s = _gs(bk, mkt['curr'])
-        wkey_h, wkey_a = 'home', 'away'
-        sh = _fl(snap_s.get(wkey_h))
-        sa = _fl(snap_s.get(wkey_a))
-        ch = _fl(curr_s.get(wkey_h))
-        ca = _fl(curr_s.get(wkey_a))
-        if sh is not None and sa is not None and ch is not None and ca is not None:
-            d_home = ch - sh   # 主水变化，正=升水(不利主)
-            d_away = ca - sa   # 客水变化，正=升水(不利客)
-            # 水位向一方倾斜≥0.10，且方向明确
-            if d_away <= -0.10 and d_home >= 0.02:
-                sigs[bk] = '-'  # 客水下降 → 庄家看好客
-                va += 1
-            elif d_home <= -0.10 and d_away >= 0.02:
-                sigs[bk] = '+'  # 主水下降 → 庄家看好主
-                vf += 1
-
-    if vf > va:
-        t_dir = '+'
-    elif va > vf:
-        t_dir = '-'
-    else:
-        t_dir = None
-
-    team = home_name if t_dir == '+' else away_name if t_dir == '-' else '?'
-    opp = away_name if t_dir == '+' else home_name if t_dir == '-' else '?'
-    wkey = 'home' if t_dir == '+' else 'away' if t_dir == '-' else None
-
-    bl = _pick_deepest_line(mkt['curr'], t_dir) if t_dir else None
-    dir_on_fav = False
-    if bl is not None and t_dir:
-        dir_on_fav = (t_dir == '+' and bl < 0) or (t_dir == '-' and bl > 0)
-
-    if t_dir is None:
-        # 交易员也找不到方向 → 只看大小球
-        ou_dir, ou_desc = check_ou(mkt)
-        if ou_dir in ('大球', '小球'):
-            trade_side = ou_dir
-            ou_order = '大' if ou_dir == '大球' else '小'
-            for bk in ['Pinnacle', 'Bet365', 'singbet']:
-                cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
-                if cc and _fl(cc.get('line')):
-                    product = f'{ou_order}{_fl(cc.get("line")):.2f}'
-                    break
-            else:
-                product = ou_dir
-            size = '5-10%'
-            reason = f'AH方向分裂，但大小球有明确{ou_dir}信号，单独交易OU'
-            return {'trade_side': trade_side, 'product': product, 'size': size, 'reason': reason}
-        return {'trade_side': 'PASS', 'product': '-', 'size': '0%', 'reason': '亚盘分裂，大小球也无明确信号，PASS'}
-
-    # 以下逻辑与原版相同，使用交易员自己的方向 t_dir
     q1 = _describe_bookmaker_action(mkt, t_dir)
     assess = evaluate_fit_and_flaw(mkt, t_dir)
     q2 = _explain_pricing(q1, mkt, t_dir, price_v)
@@ -1430,155 +1359,15 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
     comfort_score, comfort_ou = _comfortable_outcome(mkt, t_dir, name)
     q4 = f'{comfort_score[0]}-{comfort_score[1]}（AH收方向注，{comfort_ou}）' if comfort_score else '无法判断'
 
-    # 证据强度检查
-    ou_dir, ou_desc = check_ou(mkt)
-    has_clear_signal = ('推盘' in q1 or '退盘' in q1 or '降水' in q1 or '升水' in q1 or
-                        '降赔' in q1 or '涨赔' in q1 or '平赔' in q1 or
-                        (ou_dir in ('大球', '小球')))
-
-    # 默认：证据不足 PASS
-    trade_side = 'PASS'
-    product = '-'
-    size = '0%'
-    reason = '盘口证据不足，禁止猜测'
-
-    if not has_clear_signal:
-        trade_side = 'PASS'
-        reason = '盘口无明确动作，证据不足，PASS'
-    else:
-        ou_line = ou_over = ou_under = ou_bk = None
-        for bk in ['Pinnacle', 'Bet365', 'singbet']:
-            cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
-            if cc:
-                ou_line = _fl(cc.get('line'))
-                ou_over = _fl(cc.get('home'))
-                ou_under = _fl(cc.get('under'))
-                ou_bk = BK_LABEL.get(bk, bk)
-                if ou_line is not None:
-                    break
-        ou_order = '大' if ou_dir == '大球' else '小'
-        ou_water = ou_over if ou_dir == '大球' else ou_under
-        ou_prod = f'{ou_order}{_fmt(ou_line)} @{ou_water:.2f} ({ou_bk})' if ou_water and ou_line else '-'
-        ou_has_signal = ou_dir in ('大球', '小球')
-
-        # ── 先确定 AH 方向 ──
-        best_bk = None
-        best_w = None
-        for bk in BK_CORE:
-            sp = mkt.get('curr', {}).get(bk, {}).get('Spread', {})
-            v = next(iter(sp.values()), {}) if len(sp) == 1 else {}
-            ln = _fl(v.get('line'))
-            wt = _fl(v.get(wkey))
-            if ln is not None and wt is not None and abs(ln - bl) < 0.01:
-                best_bk = bk
-                best_w = wt
-                break
-
-        ah_side = None
-        ah_prod = '-'
-        ah_reason = ''
-
-        if '推盘' in q1 and '降水' in q1 and '降赔' in q1 and price_v != '偏贵':
-            ah_prod = f'{team}{_fmt_line(bl, t_dir)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
-            ah_side = team
-            ah_reason = f'庄家推盘+方向方降水+欧赔降赔，三线同步确认方向方定价，市场共识强化'
-        elif '推盘' in q1 and '升水' in q1:
-            ah_prod = f'{opp}{_fmt_line(bl, "+" if t_dir == "-" else "-") if bl else ""}'
-            ah_side = opp
-            ah_reason = f'庄家推盘但主动升水，让利吸引方向方资金流入，真实意图更倾向于对方'
-        elif '平赔降' in q1 or '平赔骤降' in q1:
-            ah_prod = f'{opp}{_fmt_line(bl, "+" if t_dir == "-" else "-") if bl else ""}'
-            ah_side = opp
-            ah_reason = f'庄家平赔全线下降，大量承接平局资金，方向方赢面受压'
-        elif price_v == '合理' or price_v == '偏便宜':
-            ah_prod = f'{team}{_fmt_line(bl, t_dir)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
-            ah_side = team
-            ah_reason = f'庄家未对方向方追价，当前盘口价格处于均衡区间'
-
-        # ── 交易员独立检查极端水位变动（不依赖 check_ou 阈值）──
-        extreme_override = None
-        for bk in ['Pinnacle', 'Bet365', 'singbet']:
-            cv = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
-            ov = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
-            if cv and ov:
-                ch = _fl(cv.get('home'))
-                oh = _fl(ov.get('home'))
-                cu = _fl(cv.get('under'))
-                ou_ = _fl(ov.get('under'))
-                if ch and oh and abs(ch - oh) >= 0.30:
-                    extreme_override = '大球' if ch > oh else '小球'
-                if cu and ou_ and abs(cu - ou_) >= 0.30:
-                    extreme_override = '小球' if cu > ou_ else '大球'
-
-        # ── 融合 AH + OU ──
-        if ah_side and ou_has_signal:
-            ou_label = '大球' if ou_dir == '大球' else '小球'
-            if extreme_override and extreme_override != ou_dir:
-                ou_reason = f'庄家{extreme_override}方向水位异常波动（≥0.30），市场价格被资金穿透，优先跟随水位方向'
-                ou_label = extreme_override
-                ou_dir = extreme_override
-                ou_order = '大' if ou_dir == '大球' else '小'
-                ou_water = ou_over if ou_dir == '大球' else ou_under
-                ou_prod = f'{ou_order}{_fmt(ou_line)} @{ou_water:.2f} ({ou_bk})' if ou_water and ou_line else '-'
-            elif extreme_override:
-                ou_reason = f'庄家{ou_label}方向水位异常确认，资金配合线位方向一致'
-            elif '诱盘' in (ou_desc or ''):
-                if '大球水升' in ou_desc:
-                    ou_reason = f'庄家升盘配合大球水升，市场在诱导大球方向，实际应看小球'
-                elif '小球水升' in ou_desc:
-                    ou_reason = f'庄家退盘配合小球水升，市场在诱导小球方向，实际应看大球'
-                else:
-                    ou_reason = f'庄家盘口与水位配合存在诱导信号，需谨慎'
-            else:
-                if '大球水降' in ou_desc or '大球水降' in ou_desc:
-                    ou_reason = f'庄家主动降低大球水位，真实看好大球方向'
-                elif '小球水降' in ou_desc or '小球水降' in ou_desc:
-                    ou_reason = f'庄家主动降低小球水位，真实看好小球方向'
-                else:
-                    ou_reason = f'庄家{ou_label}方向信号明确'
-            product = f'{ah_prod} + {ou_prod}'
-            size = 'AH 10-15%, OU 5-10%'
-            trade_side = f'{ah_side} + {ou_label}'
-            reason = f'{ah_reason}；{ou_reason}'
-        elif ah_side:
-            product = ah_prod
-            size = '10-15%'
-            trade_side = ah_side
-            reason = ah_reason
-        elif ou_has_signal:
-            ou_label = '大球' if ou_dir == '大球' else '小球'
-            if extreme_override and extreme_override != ou_dir:
-                ou_reason = f'庄家{extreme_override}方向水位异常波动（≥0.30），市场价格被资金穿透，优先跟随水位方向'
-                ou_label = extreme_override
-                ou_dir = extreme_override
-            elif extreme_override:
-                ou_reason = f'庄家{ou_label}方向水位异常确认，资金配合线位方向一致'
-            elif '诱盘' in (ou_desc or ''):
-                if '大球水升' in ou_desc:
-                    ou_reason = f'庄家升盘配合大球水升，市场在诱导大球方向，实际应看小球'
-                elif '小球水升' in ou_desc:
-                    ou_reason = f'庄家退盘配合小球水升，市场在诱导小球方向，实际应看大球'
-                else:
-                    ou_reason = f'庄家盘口与水位配合存在诱导信号，需谨慎'
-            else:
-                ou_reason = f'庄家{ou_label}方向信号明确'
-            product = ou_prod
-            size = '10-15%'
-            trade_side = ou_dir
-            reason = ou_reason
-        else:
-            trade_side = 'PASS'
-            reason = '盘口证据不足以支撑明确交易，PASS'
-
     return {
         'q1': q1,
         'q2': q2,
         'q3': q3,
         'q4': q4,
-        'trade_side': trade_side,
-        'product': product,
-        'size': size,
-        'reason': reason,
+        'trade_side': 'PASS',
+        'product': '-',
+        'size': '0%',
+        'reason': '交易员数据已输出Q1-Q4，请人工判断',
     }
 
 
@@ -2167,7 +1956,16 @@ def _print(r, name):
 
     # ── 系统结论（机械分析） ──
     lines.append('━━━ 系统结论（机械分析）━━━')
-    dir_ah = r.get('方向名', r.get('方向', '-')) or '-'
+    # 构建可读方向描述
+    _dir_raw = r.get('方向', '-')
+    _bl = r.get('_bl')
+    if _dir_raw in ('+', '-') and _bl is not None:
+        _team = name.split(' vs ')[0] if _dir_raw == '+' else name.split(' vs ')[1]
+        _sign = '-' if (_dir_raw == '+' and _bl < 0) or (_dir_raw == '-' and _bl > 0) else '+'
+        _abs = f'{abs(_bl):.2f}'.rstrip('0').rstrip('.')
+        dir_ah = f'{_team}{_sign}{_abs}'
+    else:
+        dir_ah = r.get('方向名', _dir_raw)
     euro_v = r.get('欧赔', '')
     con_map = {'支持': '强', '中性': '中性', '反对': '否决'}
     prc_map = {'偏便宜': '便宜', '合理': '合理', '偏贵': '存疑'}
@@ -2180,7 +1978,10 @@ def _print(r, name):
     flaw_str = ' '.join(f'⚠{f}' for f in flaws) if flaws else '无'
     reason = r.get('理由', '')
 
-    lines.append(f'  方向：{dir_ah}  共识：{con_map.get(euro_v,"—")}  价格：{prc_str}  大小球：{ou_str}')
+    _best = r.get('_best_line', '')
+    _price_str = f'  |  盘口：{_best}' if _best else ''
+    lines.append(f'  方向：{dir_ah}  共识：{con_map.get(euro_v,"—")}  价格：{prc_str}{_price_str}')
+    lines.append(f'  大小球：{ou_str}')
     lines.append(f'  BC：{bc_str}')
     lines.append(f'  合拍度：{fit}' + (f'（{"; ".join(fit_reason)}）' if fit_reason else ''))
     lines.append(f'  破绽：{flaw_str}')
@@ -2200,21 +2001,14 @@ def _print(r, name):
 
     lines.append('')
 
-    # ── 🎯 盘口交易员视角（独立判断） ──
-    lines.append('━━━ 🎯 盘口交易员视角（独立判断）━━━')
+    # ── 🎯 盘口交易员视角（Q1-Q4 数据，供人工判断） ──
+    lines.append('━━━ 🎯 盘口交易员视角（Q1-Q4 数据）━━━')
     ta = r.get('交易决策', {})
-    trader_side = ta.get('trade_side', 'PASS') if ta else 'PASS'
-    trader_prod = ta.get('product', '-') if ta else '-'
-    trader_qty = ta.get('size', '0%') if ta else '0%'
-    trader_reason = ta.get('reason', '盘口证据不足') if ta else '盘口证据不足'
-
-    if trader_side == 'PASS':
-        lines.append(f'  🚫 PASS  交易员无推荐')
-    else:
-        lines.append(f'  推荐标的：{trader_prod}')
-        lines.append(f'  建议仓位：{trader_qty}')
-        lines.append(f'  决策依据：{trader_reason}')
-        lines.append(f'  → {vi.get(trader_side,"→")} {trader_side}')
+    if ta:
+        lines.append(f'  Q1 庄家现在在干什么？   {ta.get("q1", "")}')
+        lines.append(f'  Q2 庄家为什么这样定价？ {ta.get("q2", "")}')
+        lines.append(f'  Q3 庄家承担哪边风险？   {ta.get("q3", "")}')
+        lines.append(f'  Q4 哪个结果最符合庄家赔付利益？ {ta.get("q4", "")}')
 
     for l in lines:
         print(l)
