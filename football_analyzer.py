@@ -1711,14 +1711,6 @@ def analyze(name, mkt):
     else:
         result['BC判决'] = '无异议'
 
-    # ── ④ 风控否决（Risk Filter）──
-    if dir_ah is not None:
-        risk = check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signals)
-        if risk:
-            risk_conc, risk_reason = risk
-            info.append(risk_reason)
-            return _fin(result, risk_conc, risk_reason, info, flipped)
-
     # ── 合拍度 + 破绽（仅在系统有方向时）──
     if dir_ah is not None:
         _assess = evaluate_fit_and_flaw(mkt, dir_ah)
@@ -1728,6 +1720,19 @@ def analyze(name, mkt):
     else:
         result['合拍度'] = '—'
         result['破绽'] = []
+
+    # 第三层：交易员决策（独立，始终执行）
+    trading = trader_analysis(mkt, dir_ah, 'PASS', price_v, name)
+    result['交易决策'] = trading
+    info.append(f'交易员独立判断：{trading["reason"]}')
+
+    # ── ④ 风控否决（Risk Filter）──
+    if dir_ah is not None:
+        risk = check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signals)
+        if risk:
+            risk_conc, risk_reason = risk
+            info.append(risk_reason)
+            return _fin(result, risk_conc, risk_reason, info, flipped, trading)
 
     # ── ⑥ 最终决策（系统结论）──
     if dir_ah is None:
@@ -1755,10 +1760,6 @@ def analyze(name, mkt):
     else:
         system_conc = 'EXECUTE'
         system_reason = '方向明确·共识支持·价格确认'
-
-    # 第三层：交易员决策（独立，始终执行）
-    trading = trader_analysis(mkt, dir_ah, system_conc, price_v, name)
-    info.append(f'交易员独立判断：{trading["reason"]}')
 
     return _fin(result, system_conc, system_reason, info, flipped, trading)
 
