@@ -722,7 +722,7 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
     ah_str = f'{team}{sign}{_fmt(abs(bl))}'
     if best_w:
         ah_str += f' @{best_w:.2f}'
-    items = [f'参考盘口：{ah_str}（{BK_LABEL.get(best_bk, "Pin")}）']
+    items = []
 
     # ── 盘口拆解 ──
     ab = abs(bl)
@@ -961,7 +961,7 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
         st = settle(ah, ou_side)
         items.append(f'庄家最舒服比分：{score[0]}-{score[1]}（{st}，{ou_side}）')
 
-    return '', items
+    return f'{ah_str}（{BK_LABEL.get(best_bk, "Pin")}）', items
 
 
 # ═══════════════════════════════════════════
@@ -1285,7 +1285,13 @@ def evaluate_fit_and_flaw(mkt, dir_ah):
     # ── 破绽 ──
     flaws = []
     if ou_is_trap:
-        flaws.append(f'O/U诱盘({ou_dir})')
+        if '大球水升' in (ou_desc or ''):
+            trap_label = '诱大球'
+        elif '小球水升' in (ou_desc or ''):
+            trap_label = '诱小球'
+        else:
+            trap_label = f'{ou_dir}(诱盘)'
+        flaws.append(trap_label)
 
     # 亚盘滞后定价
     lines = {}
@@ -1378,8 +1384,6 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         ou_water = ou_over if ou_dir == '大球' else ou_under
         ou_prod = f'{ou_order}{_fmt(ou_line)} @{ou_water:.2f} ({ou_bk})' if ou_water and ou_line else '-'
         ou_has_signal = ou_dir in ('大球', '小球')
-        # ou_dir 已经是系统推荐方向（若诱盘则已自动反转），直接使用
-        ou_trap_side = '大球' if ou_dir == '小球' else '小球'  # 诱盘的反面
 
         # ── 先确定 AH 方向 ──
         best_bk = None
@@ -1420,7 +1424,13 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         if ah_side and ou_has_signal:
             ou_label = '大球' if ou_dir == '大球' else '小球'
             if '诱盘' in (ou_desc or ''):
-                ou_reason = f'庄家诱{ou_trap_side}，推荐{ou_label}'
+                # 从描述中提取诱盘方向
+                if '大球水升' in ou_desc:
+                    ou_reason = f'少数认为诱大球，多数看{ou_label}'
+                elif '小球水升' in ou_desc:
+                    ou_reason = f'少数认为诱小球，多数看{ou_label}'
+                else:
+                    ou_reason = f'存在分歧，多数看{ou_label}'
             else:
                 ou_reason = f'真{ou_label}信号'
             product = f'{ah_prod} + {ou_prod}'
@@ -1435,7 +1445,12 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         elif ou_has_signal:
             ou_label = '大球' if ou_dir == '大球' else '小球'
             if '诱盘' in (ou_desc or ''):
-                ou_reason = f'庄家诱{ou_trap_side}，推荐{ou_label}'
+                if '大球水升' in ou_desc:
+                    ou_reason = f'少数认为诱大球，多数看{ou_label}'
+                elif '小球水升' in ou_desc:
+                    ou_reason = f'少数认为诱小球，多数看{ou_label}'
+                else:
+                    ou_reason = f'存在分歧，多数看{ou_label}'
             else:
                 ou_reason = f'真{ou_label}信号'
             product = ou_prod
@@ -1583,8 +1598,9 @@ def analyze(name, mkt):
 
     # ── 盘口管理分析（提前计算，确保所有路径都能输出）──
     if dir_ah is not None:
-        _, bal_items = bookmaker_balance(mkt, dir_ah, flipped, name)
+        best_line, bal_items = bookmaker_balance(mkt, dir_ah, flipped, name)
         result['盘口管理'] = bal_items
+        result['_best_line'] = best_line
 
     # ── 庄家反证（Bookmaker Challenge，提前计算）──
     bc_level, bc_reason = bookmaker_challenge(mkt, dir_ah, active, price_v, euro_v)
@@ -1992,8 +2008,10 @@ def _print(r, name):
             lines.append(f'    {item}')
         lines.append('  ' + chr(0x2500) * 50)
     # 第二层：系统结论（分析）
+    best_line = r.get('_best_line', '')
     lines += [
         f'  方向 Direction:       {d}',
+        f'  盘口 Price:           {best_line}' if best_line else '',
         f'  共识 Consensus:       {con}',
         f'  价格 Price:           {prc}',
         f'  风险 Risk:            {rsk}',
