@@ -1352,6 +1352,7 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
     away_name = name.split(' vs ')[1].strip()
 
     # ── 交易员自行确定方向（不依赖系统）──
+    # 综合线位投票 + 水位偏移投票
     sigs = {}
     for bk in BK_CORE:
         snap_ln = _fl(_gs(bk, mkt['snap']).get('line'))
@@ -1360,12 +1361,34 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
     vf = sum(1 for s in sigs.values() if s == '+')
     va = sum(1 for s in sigs.values() if s == '-')
 
+    # 水位偏移投票：线位不动但水位大幅倾斜，视为隐性信号
+    for bk in BK_CORE:
+        if sigs[bk] != '0':
+            continue  # 有线位变化的已经投票
+        snap_s = _gs(bk, mkt['snap'])
+        curr_s = _gs(bk, mkt['curr'])
+        wkey_h, wkey_a = 'home', 'away'
+        sh = _fl(snap_s.get(wkey_h))
+        sa = _fl(snap_s.get(wkey_a))
+        ch = _fl(curr_s.get(wkey_h))
+        ca = _fl(curr_s.get(wkey_a))
+        if sh is not None and sa is not None and ch is not None and ca is not None:
+            d_home = ch - sh   # 主水变化，正=升水(不利主)
+            d_away = ca - sa   # 客水变化，正=升水(不利客)
+            # 水位向一方倾斜≥0.10，且方向明确
+            if d_away <= -0.10 and d_home >= 0.02:
+                sigs[bk] = '-'  # 客水下降 → 庄家看好客
+                va += 1
+            elif d_home <= -0.10 and d_away >= 0.02:
+                sigs[bk] = '+'  # 主水下降 → 庄家看好主
+                vf += 1
+
     if vf > va:
         t_dir = '+'
     elif va > vf:
         t_dir = '-'
     else:
-        t_dir = None  # 交易员也找不到方向
+        t_dir = None
 
     team = home_name if t_dir == '+' else away_name if t_dir == '-' else '?'
     opp = away_name if t_dir == '+' else home_name if t_dir == '-' else '?'
