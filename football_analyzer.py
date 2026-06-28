@@ -2034,14 +2034,14 @@ def _normalize_ah_lines(mkt):
                             if hw is not None and aw is not None:
                                 s['home'], s['away'] = aw, hw
     # 水位 HK→EU 扫尾：home/away/under 永远是水位，不是线位
-    # 无论是否 0.25 倍数，0.50~1.50 范围内的全部转（覆盖 1.0, 1.25, 0.5 等盲区）
+    # AH 的 HK 水位几乎都在 1.0 以内（含 1.0 = EU 2.0），>1.0 交由 _fl 处理
     for bk_data in [curr, snap]:
         for bk, v in bk_data.items():
             for mk in ('Spread', 'Totals'):
                 for k, s in v.get(mk, {}).items():
                     for field in ('home', 'away', 'under'):
                         val = s.get(field)
-                        if isinstance(val, (int, float)) and 0.50 < val < 1.50:
+                        if isinstance(val, (int, float)) and 0.50 <= val <= 1.0:
                             s[field] = round(val + 1.0, 2)
 
 
