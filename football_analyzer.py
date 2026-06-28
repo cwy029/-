@@ -2167,70 +2167,83 @@ def main():
 
 
 def _print(r, name):
+    """三层输出：🧮庄家平衡 → 系统结论 → 🎯盘口交易员视角"""
     vi = {'EXECUTE': '✅', 'PASS': '🚫', 'WATCHLIST': '🔶'}
-    vi_full = {'EXECUTE': '✅ EXECUTE', 'PASS': '🚫 PASS', 'WATCHLIST': '🔶 WATCHLIST'}
     system_conc = r.get('结论', 'PASS')
+    icon = vi.get(system_conc, '?')
+
+    lines = ['', f'  {"━" * 50}', f'  {name}', f'  {"━" * 50}', '']
+
+    # ── 🧮 庄家平衡（纯数据） ──
+    lines.append('🧮 庄家平衡（纯数据）')
+    bal = r.get('盘口管理', [])
+    if bal:
+        for item in bal:
+            item = item.strip()
+            if item:
+                lines.append(f'  {item}')
+    else:
+        sig = r.get('信号', '')
+        ou = r.get('大小球', '')
+        prc = r.get('价格', '')
+        if sig or ou or prc:
+            lines.append(f'  盘口信号：{sig}' if sig else '')
+            lines.append(f'  大小球：{ou}' if ou else '')
+            lines.append(f'  价格：{prc}' if prc else '')
+        else:
+            lines.append(f'  （赛事基础盘口数据—无显著异常波动）')
+    lines.append('')
+
+    # ── 系统结论（机械分析） ──
+    lines.append('━━━ 系统结论（机械分析）━━━')
+    dir_ah = r.get('方向名', r.get('方向', '-')) or '-'
+    euro_v = r.get('欧赔', '')
+    con_map = {'支持': '强', '中性': '中性', '反对': '否决'}
+    prc_map = {'偏便宜': '便宜', '合理': '合理', '偏贵': '存疑'}
+    prc_str = r.get('价格', '-')
+    ou_str = r.get('大小球结论', '') or r.get('大小球', '') or '-'
+    bc_str = r.get('BC判决', r.get('BC', '—'))
+    fit = r.get('合拍度', '—')
+    fit_reason = r.get('合拍度理由', [])
+    flaws = r.get('破绽', [])
+    flaw_str = ' '.join(f'⚠{f}' for f in flaws) if flaws else '无'
+    reason = r.get('理由', '')
+
+    lines.append(f'  方向：{dir_ah}  共识：{con_map.get(euro_v,"—")}  价格：{prc_str}  大小球：{ou_str}')
+    lines.append(f'  BC：{bc_str}')
+    lines.append(f'  合拍度：{fit}' + (f'（{"; ".join(fit_reason)}）' if fit_reason else ''))
+    lines.append(f'  破绽：{flaw_str}')
+    lines.append(f'  → {icon} {system_conc}  {reason}')
+
+    # 详细步骤
+    steps = r.get('步骤', [])
+    if steps:
+        sys_steps = [s for s in steps if not s.startswith('交易员')]
+        if sys_steps:
+            lines.append('')
+            lines.append(f'  📋 详细步骤')
+            for i, s in enumerate(sys_steps):
+                s = s.strip()
+                if s:
+                    lines.append(f'    {i+1}. {s}')
+
+    lines.append('')
+
+    # ── 🎯 盘口交易员视角（独立判断） ──
+    lines.append('━━━ 🎯 盘口交易员视角（独立判断）━━━')
     ta = r.get('交易决策', {})
     trader_side = ta.get('trade_side', 'PASS') if ta else 'PASS'
     trader_prod = ta.get('product', '-') if ta else '-'
     trader_qty = ta.get('size', '0%') if ta else '0%'
     trader_reason = ta.get('reason', '盘口证据不足') if ta else '盘口证据不足'
 
-    lines = [
-        '',
-        '  ' + '━' * 50,
-        f'  {name}',
-        f'  系统: {vi.get(system_conc,"?")} {system_conc}  |  交易员: {vi.get(trader_side,"?") if trader_side in vi else "→"} {trader_side}',
-        '  ' + '━' * 50,
-    ]
-
-    # ── 庄家平衡（纯数据，两边共享） ──
-    bal = r.get('盘口管理', [])
-    if bal:
-        lines.append('')
-        lines.append('  ── 庄家平衡 ──')
-        for item in bal:
-            lines.append(f'    {item}')
-
-    # ── 系统分析 ──
-    euro_v = r.get('欧赔', '')
-    price_v = r.get('价格', '')
-    con_map = {'支持': '强', '中性': '中性', '反对': '否决'}
-    prc_map = {'偏便宜': '便宜', '合理': '合理', '偏贵': '存疑'}
-    risk_map = {'EXECUTE': '低', 'WATCHLIST': '中', 'PASS': 'PASS'}
-    lines.append('')
-    lines.append('  ── 系统分析（仅供参考） ──')
-    lines.append(f'  方向 Direction:       {r.get("方向名","-")}')
-    lines.append(f'  共识 Consensus:       {con_map.get(euro_v,"—")}')
-    lines.append(f'  价格 Price:           {prc_map.get(price_v,"—")}')
-    lines.append(f'  风险 Risk:            {risk_map.get(system_conc,"—")}')
-    lines.append(f'  大小球 OU:            {r.get("大小球结论","-")}')
-    lines.append(f'  合拍度:               {r.get("合拍度","—")}' + (f'  ({", ".join(r.get("合拍度理由",[]))})' if r.get('合拍度理由') else ''))
-    lines.append(f'  破绽:                 {"、".join(r.get("破绽",[])) if r.get("破绽") else "无"}')
-    lines.append(f'  → {vi_full.get(system_conc,"?")}  {r.get("理由","")}')
-
-    # ── 交易员判断（独立） ──
-    lines.append('')
-    lines.append('  ── 交易员判断（独立，不参考系统） ──')
-    if trader_prod and trader_prod != '-':
-        lines.append(f'  推荐标的: {trader_prod}')
-        lines.append(f'  建议仓位: {trader_qty}')
+    if trader_side == 'PASS':
+        lines.append(f'  🚫 PASS  交易员无推荐')
     else:
-        lines.append(f'  推荐标的: PASS（0%）')
-    lines.append(f'  决策依据: {trader_reason}')
-    lines.append(f'  → {vi.get(trader_side,"→")} {trader_side}')
-
-    # 步骤明细（仅供追溯，不参与决策）
-    steps = r.get('步骤', [])
-    if steps:
-        sys_steps = [s for s in steps if not s.startswith('交易员')]
-        if sys_steps:
-            lines.append('')
-            lines.append(f'  … 系统步骤（可忽略） …')
-            for i, s in enumerate(sys_steps):
-                s = s.strip()
-                if s:
-                    lines.append(f'    {i+1}. {s}')
+        lines.append(f'  推荐标的：{trader_prod}')
+        lines.append(f'  建议仓位：{trader_qty}')
+        lines.append(f'  决策依据：{trader_reason}')
+        lines.append(f'  → {vi.get(trader_side,"→")} {trader_side}')
 
     for l in lines:
         print(l)
