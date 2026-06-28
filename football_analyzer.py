@@ -2012,7 +2012,7 @@ def _print(r, name):
         '',
         '  ' + '━' * 50,
         f'  {name}',
-        f'  系统: {vi.get(system_conc,"?")} {system_conc}  |  交易员: {vi.get(trader_side,"?")} {trader_side}',
+        f'  系统: {vi.get(system_conc,"?")} {system_conc}  |  交易员: {vi.get(trader_side,"?") if trader_side in vi else "→"} {trader_side}',
         '  ' + '━' * 50,
     ]
 
@@ -2050,7 +2050,7 @@ def _print(r, name):
     else:
         lines.append(f'  推荐标的: PASS（0%）')
     lines.append(f'  决策依据: {trader_reason}')
-    lines.append(f'  → {vi_full.get(trader_side,"?")}  {trader_side}')
+    lines.append(f'  → {vi.get(trader_side,"→")} {trader_side}')
 
     # 步骤明细（仅供追溯，不参与决策）
     steps = r.get('步骤', [])
