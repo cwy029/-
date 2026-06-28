@@ -1886,7 +1886,7 @@ def _parse_md(text):
                         bk = 'William Hill'
                     elif 'Bet365' in bk or 'bet365' in bk or '36*' in bk:
                         bk = 'Bet365'
-                    elif 'singbet' in bk or '皇冠' in bk or 'Crown' in bk or 'Crow*' in bk or 'sbobet' in bk.lower():
+                    elif 'singbet' in bk or '皇冠' in bk or '皇*' in bk or 'Crown' in bk or 'Crow*' in bk or 'sbobet' in bk.lower():
                         bk = 'singbet'
                     elif '澳门' in bk or '澳*' in bk:
                         bk = '澳门彩票'
@@ -1993,6 +1993,40 @@ def _parse_md(text):
                 j += 1
 
             if curr:
+                # ── AH 线位归一化 ──
+                # 某些数据源线位从让球方角度列（非主队角度）
+                # 对比 ML 赔率判断实际让球方，需要时翻转线位
+                ml_fav_is_home = None
+                for bk_data in [curr, snap]:
+                    for bk, v in bk_data.items():
+                        ml = v.get('ML', {}).get('1', {})
+                        h = _fl(ml.get('home'))
+                        a = _fl(ml.get('away'))
+                        if h and a:
+                            # 主队赔率低 → 主队是让球方
+                            inferred = h < a
+                            if ml_fav_is_home is None:
+                                ml_fav_is_home = inferred
+                            elif ml_fav_is_home != inferred:
+                                # 跨庄不一致，无法判断，跳过归一化
+                                ml_fav_is_home = None
+                                break
+                    if ml_fav_is_home is None:
+                        break
+                if ml_fav_is_home is not None:
+                    for bk_data in [curr, snap]:
+                        for bk, v in bk_data.items():
+                            sp = v.get('Spread', {})
+                            for k, s in list(sp.items()):
+                                ln = s.get('line')
+                                if ln is not None:
+                                    ah_fav_is_home = ln < 0
+                                    if ah_fav_is_home != ml_fav_is_home:
+                                        # 翻转线位：取反并交换主客水
+                                        s['line'] = -ln
+                                        hw, aw = s.get('home'), s.get('away')
+                                        if hw is not None and aw is not None:
+                                            s['home'], s['away'] = aw, hw
                 matches.append({'name': name, 'curr': curr, 'snap': snap})
             i = j
             continue
