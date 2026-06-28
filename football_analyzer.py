@@ -1583,8 +1583,7 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
 
 
 def analyze(name, mkt):
-
-
+    _normalize_ah_lines(mkt)
     result = {'name': name}
     info = []  # 信息项，不影响结论
     verdicts = []  # 各步判定摘要
@@ -1993,46 +1992,56 @@ def _parse_md(text):
                 j += 1
 
             if curr:
-                # ── AH 线位归一化 ──
-                # 某些数据源线位从让球方角度列（非主队角度）
-                # 对比 ML 赔率判断实际让球方，需要时翻转线位
-                ml_fav_is_home = None
-                for bk_data in [curr, snap]:
-                    for bk, v in bk_data.items():
-                        ml = v.get('ML', {}).get('1', {})
-                        h = _fl(ml.get('home'))
-                        a = _fl(ml.get('away'))
-                        if h and a:
-                            # 主队赔率低 → 主队是让球方
-                            inferred = h < a
-                            if ml_fav_is_home is None:
-                                ml_fav_is_home = inferred
-                            elif ml_fav_is_home != inferred:
-                                # 跨庄不一致，无法判断，跳过归一化
-                                ml_fav_is_home = None
-                                break
-                    if ml_fav_is_home is None:
-                        break
-                if ml_fav_is_home is not None:
-                    for bk_data in [curr, snap]:
-                        for bk, v in bk_data.items():
-                            sp = v.get('Spread', {})
-                            for k, s in list(sp.items()):
-                                ln = s.get('line')
-                                if ln is not None:
-                                    ah_fav_is_home = ln < 0
-                                    if ah_fav_is_home != ml_fav_is_home:
-                                        # 翻转线位：取反并交换主客水
-                                        s['line'] = -ln
-                                        hw, aw = s.get('home'), s.get('away')
-                                        if hw is not None and aw is not None:
-                                            s['home'], s['away'] = aw, hw
+                _normalize_ah_lines({'curr': curr, 'snap': snap})
                 matches.append({'name': name, 'curr': curr, 'snap': snap})
             i = j
             continue
         i += 1
 
     return matches
+
+
+def _normalize_ah_lines(mkt):
+    """AH 线位归一化：根据 ML 赔率判断让球方，需要时翻转线位"""
+    snap = mkt.get('snap', {})
+    curr = mkt.get('curr', {})
+    ml_fav_is_home = None
+    for bk_data in [curr, snap]:
+        for bk, v in bk_data.items():
+            ml = v.get('ML', {}).get('1', {})
+            h = _fl(ml.get('home'))
+            a = _fl(ml.get('away'))
+            if h and a:
+                inferred = h < a
+                if ml_fav_is_home is None:
+                    ml_fav_is_home = inferred
+                elif ml_fav_is_home != inferred:
+                    ml_fav_is_home = None
+                    break
+        if ml_fav_is_home is None:
+            break
+    if ml_fav_is_home is not None:
+        for bk_data in [curr, snap]:
+            for bk, v in bk_data.items():
+                sp = v.get('Spread', {})
+                for k, s in list(sp.items()):
+                    ln = s.get('line')
+                    if ln is not None:
+                        ah_fav_is_home = ln < 0
+                        if ah_fav_is_home != ml_fav_is_home:
+                            s['line'] = -ln
+                            hw, aw = s.get('home'), s.get('away')
+                            if hw is not None and aw is not None:
+                                s['home'], s['away'] = aw, hw
+    # 水位 HK→EU 扫尾：_fl 不会转换恰好 1.0 的值（0.25 倍数盲区）
+    for bk_data in [curr, snap]:
+        for bk, v in bk_data.items():
+            for mk in ('Spread', 'Totals'):
+                for k, s in v.get(mk, {}).items():
+                    for field in ('home', 'away', 'under'):
+                        val = s.get(field)
+                        if isinstance(val, (int, float)) and val == 1.0:
+                            s[field] = 2.0
 
 
 def _log_match(r, name):
