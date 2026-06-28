@@ -2070,24 +2070,16 @@ def _print(r, name):
 
     lines.append('')
 
-    # ── 🎯 盘口交易员视角（Q1-Q4 数据 + 人工判断） ──
-    lines.append('━━━ 🎯 盘口交易员视角（Q1-Q4 数据 + 人工判断）━━━')
+    # ── 🎯 盘口交易员视角（强制思考流程） ──
+    lines.append('━━━ 🎯 盘口交易员视角（强制思考流程）━━━')
     ta = r.get('交易决策', {})
-    if ta:
-        lines.append(f'  Q1 庄家现在在干什么？   {ta.get("q1", "")}')
-        lines.append(f'  Q2 庄家为什么这样定价？ {ta.get("q2", "")}')
-        lines.append(f'  Q3 庄家承担哪边风险？   {ta.get("q3", "")}')
-        lines.append(f'  Q4 哪个结果最符合庄家赔付利益？ {ta.get("q4", "")}')
-        val = ta.get('value', '')
-        if val:
-            lines.append(f'')
-            lines.append(f'  ── 价值评估 ──')
-            lines.append(f'  📊 {val}')
-        jdg = ta.get('judgment', '')
-        if jdg:
-            lines.append(f'')
-            lines.append(f'  🧑‍💼 我的判断：')
-            lines.append(f'  {jdg}')
+    val = ta.get('value', '') if ta else ''
+    jdg = ta.get('judgment', '') if ta else ''
+    if val:
+        lines.append(f'  📊 {val}')
+    if jdg:
+        lines.append(f'')
+        lines.append(f'  {jdg}')
 
     for l in lines:
         print(l)
