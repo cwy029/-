@@ -1461,16 +1461,7 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         ou_prod = f'{ou_order}{_fmt(ou_line)} @{ou_water:.2f} ({ou_bk})' if ou_water and ou_line else '-'
         ou_has_signal = ou_dir in ('大球', '小球')
 
-        # ── 先判断线位是否有实际变动 ──
-        line_moved = False
-        for bk in BK_CORE:
-            sl = _ln(bk, mkt.get('snap', {}))
-            cl = _ln(bk, mkt.get('curr', {}))
-            if sl is not None and cl is not None and abs(cl - sl) >= 0.25:
-                line_moved = True
-                break
-
-        # ── 确定 AH 方向（线位不动时不出AH） ──
+        # ── 先确定 AH 方向 ──
         best_bk = None
         best_w = None
         for bk in BK_CORE:
@@ -1486,38 +1477,23 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         ah_side = None
         ah_prod = '-'
         ah_reason = ''
-        ah_confidence = 0  # 0=无, 1=低, 2=中, 3=高
 
-        if not line_moved:
-            # 线位没动过 → 不出AH，只靠OU
-            ah_side = None
-            ah_confidence = 0
-        elif '推盘' in q1 and '降水' in q1 and '降赔' in q1 and price_v != '偏贵':
+        if '推盘' in q1 and '降水' in q1 and '降赔' in q1 and price_v != '偏贵':
             ah_prod = f'{team}{_fmt_line(bl, t_dir)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
             ah_side = team
-            ah_confidence = 3
             ah_reason = f'庄家推盘+方向方降水+欧赔降赔，三线同步确认方向方定价，市场共识强化'
         elif '推盘' in q1 and '升水' in q1:
             ah_prod = f'{opp}{_fmt_line(bl, "+" if t_dir == "-" else "-") if bl else ""}'
             ah_side = opp
-            ah_confidence = 2
             ah_reason = f'庄家推盘但主动升水，让利吸引方向方资金流入，真实意图更倾向于对方'
         elif '平赔降' in q1 or '平赔骤降' in q1:
             ah_prod = f'{opp}{_fmt_line(bl, "+" if t_dir == "-" else "-") if bl else ""}'
             ah_side = opp
-            ah_confidence = 2 if line_moved else 1
             ah_reason = f'庄家平赔全线下降，大量承接平局资金，方向方赢面受压'
         elif price_v == '合理' or price_v == '偏便宜':
             ah_prod = f'{team}{_fmt_line(bl, t_dir)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
             ah_side = team
-            ah_confidence = 2 if line_moved else 1
             ah_reason = f'庄家未对方向方追价，当前盘口价格处于均衡区间'
-
-        # 线位不动时禁止出AH
-        if ah_side and not line_moved:
-            ah_side = None
-            ah_prod = '-'
-            ah_reason = ''
 
         # ── 交易员独立检查极端水位变动（不依赖 check_ou 阈值）──
         extreme_override = None
@@ -1537,11 +1513,6 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         # ── 融合 AH + OU ──
         if ah_side and ou_has_signal:
             ou_label = '大球' if ou_dir == '大球' else '小球'
-            # 低信心AH，降仓
-            if ah_confidence <= 1:
-                size = 'AH 5-10%, OU 5-10%'
-            else:
-                size = 'AH 10-15%, OU 5-10%'
             if extreme_override and extreme_override != ou_dir:
                 ou_reason = f'庄家{extreme_override}方向水位异常波动（≥0.30），市场价格被资金穿透，优先跟随水位方向'
                 ou_label = extreme_override
@@ -1571,7 +1542,7 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
             reason = f'{ah_reason}；{ou_reason}'
         elif ah_side:
             product = ah_prod
-            size = '5-10%' if ah_confidence <= 1 else '10-15%'
+            size = '10-15%'
             trade_side = ah_side
             reason = ah_reason
         elif ou_has_signal:
@@ -1721,11 +1692,11 @@ def analyze(name, mkt):
     info.append(f'{price_label}（{price_d}）')
     verdicts.append(f'价格{price_label}')
 
-    # ── 盘口管理分析（即使无方向也计算，用主队方向作为默认视角）──
-    _bal_dir = dir_ah if dir_ah is not None else '+'
-    best_line, bal_items = bookmaker_balance(mkt, _bal_dir, flipped, name)
-    result['盘口管理'] = bal_items
-    result['_best_line'] = best_line if dir_ah is not None else ''
+    # ── 盘口管理分析 ──
+    if dir_ah is not None:
+        best_line, bal_items = bookmaker_balance(mkt, dir_ah, flipped, name)
+        result['盘口管理'] = bal_items
+        result['_best_line'] = best_line
 
     # ── 庄家反证（Bookmaker Challenge）──
     bc_level, bc_reason = bookmaker_challenge(mkt, dir_ah, active if dir_ah else 0, price_v, euro_v)
@@ -2021,7 +1992,6 @@ def _parse_md(text):
                 j += 1
 
             if curr:
-                _normalize_ah_lines({'curr': curr, 'snap': snap})
                 _normalize_ah_lines({'curr': curr, 'snap': snap})
                 matches.append({'name': name, 'curr': curr, 'snap': snap})
             i = j
