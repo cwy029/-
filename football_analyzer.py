@@ -1420,11 +1420,36 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
             ah_side = team
             ah_reason = '价格合理，跟方向方'
 
+        # ── 交易员独立检查极端水位变动（不依赖 check_ou 阈值）──
+        extreme_override = None
+        for bk in ['Pinnacle', 'Bet365', 'singbet']:
+            cv = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+            ov = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
+            if cv and ov:
+                ch = _fl(cv.get('home'))
+                oh = _fl(ov.get('home'))
+                cu = _fl(cv.get('under'))
+                ou_ = _fl(ov.get('under'))
+                if ch and oh and abs(ch - oh) >= 0.30:
+                    extreme_override = '大球' if ch > oh else '小球'
+                if cu and ou_ and abs(cu - ou_) >= 0.30:
+                    extreme_override = '小球' if cu > ou_ else '大球'
+
         # ── 融合 AH + OU ──
         if ah_side and ou_has_signal:
             ou_label = '大球' if ou_dir == '大球' else '小球'
-            if '诱盘' in (ou_desc or ''):
-                # 从描述中提取诱盘方向
+            # 交易员独立判断：极端水位覆写
+            if extreme_override and extreme_override != ou_dir:
+                ou_reason = f'水位异常（极端{extreme_override}信号），覆盖系统多数判{ou_label}，交易员独立改看{extreme_override}'
+                ou_label = extreme_override
+                ou_dir = extreme_override
+                # 重建 OU 产品
+                ou_order = '大' if ou_dir == '大球' else '小'
+                ou_water = ou_over if ou_dir == '大球' else ou_under
+                ou_prod = f'{ou_order}{_fmt(ou_line)} @{ou_water:.2f} ({ou_bk})' if ou_water and ou_line else '-'
+            elif extreme_override:
+                ou_reason = f'真{ou_label}信号（水位异常确认）'
+            elif '诱盘' in (ou_desc or ''):
                 if '大球水升' in ou_desc:
                     ou_reason = f'少数认为诱大球，多数看{ou_label}'
                 elif '小球水升' in ou_desc:
@@ -1444,7 +1469,13 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
             reason = ah_reason
         elif ou_has_signal:
             ou_label = '大球' if ou_dir == '大球' else '小球'
-            if '诱盘' in (ou_desc or ''):
+            if extreme_override and extreme_override != ou_dir:
+                ou_reason = f'水位异常（极端{extreme_override}信号），覆盖系统多数判{ou_label}，交易员独立改看{extreme_override}'
+                ou_label = extreme_override
+                ou_dir = extreme_override
+            elif extreme_override:
+                ou_reason = f'真{ou_label}信号（水位异常确认）'
+            elif '诱盘' in (ou_desc or ''):
                 if '大球水升' in ou_desc:
                     ou_reason = f'少数认为诱大球，多数看{ou_label}'
                 elif '小球水升' in ou_desc:
@@ -1888,6 +1919,23 @@ def _log_match(r, name):
     """存档比赛分析结果到 results_log.jsonl"""
     import os, datetime
     log_path = '/var/minis/skills/六扇门/results_log.jsonl'
+    td = r.get('交易决策', {})
+    ou_str = r.get('大小球', '') or ''
+    ou_dir = ou_str.split(' ')[0] if ou_str else ''
+
+    # 提取 OU 线位（取第二条 "大小球：X.X（大球...）" 格式的行）
+    ou_line = None
+    bal = r.get('盘口管理', [])
+    for item in bal:
+        if item.startswith('大小球：') and '（' in item and '大球' in item:
+            try:
+                parts = item.split('：')[1]
+                line_str = parts.split('（')[0].strip()
+                ou_line = float(line_str)
+            except:
+                pass
+            break
+
     entry = {
         'ts': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
         'name': name,
@@ -1899,6 +1947,14 @@ def _log_match(r, name):
         'euro': r.get('欧赔'),
         'BC': r.get('BC判决'),
         'reason': r.get('理由'),
+        'ou_signal': ou_dir,
+        'ou_line': ou_line,
+        '交易决策': {
+            'product': td.get('product') if td else None,
+            'size': td.get('size') if td else None,
+            'trade_side': td.get('trade_side') if td else None,
+            'reason': td.get('reason') if td else None,
+        } if td else None,
     }
     with open(log_path, 'a') as f:
         f.write(json.dumps(entry, ensure_ascii=False) + '\n')
@@ -1907,6 +1963,7 @@ def _log_match(r, name):
 # ── CLI ──
 
 def main():
+    import os, datetime
     if len(sys.argv) > 1:
         # 尝试 JSON，失败则尝试 Markdown
         with open(sys.argv[1]) as f:
@@ -1919,6 +1976,15 @@ def main():
             r = analyze(item['name'], item)
             _print(r, item['name'])
             _log_match(r, item['name'])
+            # 保存原始数据文件供复盘调用
+            data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'matches')
+            os.makedirs(data_dir, exist_ok=True)
+            safe_name = item['name'].replace(' ', '_').replace('vs', 'vs')
+            ts = datetime.datetime.now().strftime('%m%d_%H%M')
+            data_path = os.path.join(data_dir, f'{ts}_{safe_name}.md')
+            if not os.path.exists(data_path):
+                with open(data_path, 'w') as df:
+                    df.write(raw)
     else:
         import shutil
         w = shutil.get_terminal_size().columns
