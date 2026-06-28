@@ -1999,7 +1999,8 @@ def _print(r, name):
 
     _best = r.get('_best_line', '')
     _price_str = f'  |  盘口：{_best}' if _best else ''
-    lines.append(f'  方向：{dir_ah}  共识：{con_map.get(euro_v,"—")}  价格：{prc_str}{_price_str}')
+    _sig = r.get('信号', '')
+    lines.append(f'  方向：{dir_ah}{"  (" + _sig + ")" if _sig else ""}  共识：{con_map.get(euro_v,"—")}  价格：{prc_str}{_price_str}')
     lines.append(f'  大小球：{ou_str}')
     lines.append(f'  BC：{bc_str}')
     lines.append(f'  合拍度：{fit}' + (f'（{"; ".join(fit_reason)}）' if fit_reason else ''))
