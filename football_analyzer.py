@@ -1349,6 +1349,48 @@ def evaluate_fit_and_flaw(mkt, dir_ah):
 # 交易员手动判断（由用户在对话中设定，下次运行前写入）
 TRADER_JUDGMENT = ''
 
+
+
+# ═══════════════════════════════════════════
+#  交易员价值评估：隐含概率 + 凯利仓位
+# ═══════════════════════════════════════════
+
+def _implied_prob(odds):
+    if not odds or any(o is None or o <= 1 for o in odds):
+        return None, None
+    raw = [1.0 / o for o in odds]
+    total = sum(raw)
+    return [r / total for r in raw], round(total - 1, 4)
+
+
+def _kelly(decimal_odds, assessed_prob):
+    if decimal_odds <= 1 or not (0 < assessed_prob < 1):
+        return 0.0
+    b = decimal_odds - 1
+    q = 1 - assessed_prob
+    f = (b * assessed_prob - q) / b
+    return round(max(0, min(f, 0.25)), 3)
+
+
+def value_assessment(mkt, t_dir):
+    for bk in ['Pinnacle']:
+        ml = mkt.get('curr', {}).get(bk, {}).get('ML', {}).get('1', {})
+        home = _fl(ml.get('home'))
+        draw = _fl(ml.get('draw'))
+        away = _fl(ml.get('away'))
+        if home and draw and away:
+            probs, margin = _implied_prob([home, draw, away])
+            if probs:
+                hp, dp, ap = probs
+                dir_prob = hp if t_dir == '+' else ap
+                return {
+                    'market_probs': f'主{hp:.0%} 平{dp:.0%} 客{ap:.0%}',
+                    'margin': f'{margin:.1%}',
+                    'dir_prob': f'{dir_prob:.0%}',
+                }
+    return None
+
+
 def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
     """第三层：盘口交易员视角 — 输出Q1-Q4数据 + 人工判断。"""
     global TRADER_JUDGMENT
@@ -1363,6 +1405,12 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
     comfort_score, comfort_ou = _comfortable_outcome(mkt, t_dir, name)
     q4 = f'{comfort_score[0]}-{comfort_score[1]}（AH收方向注，{comfort_ou}）' if comfort_score else '无法判断'
 
+    # 价值评估
+    val = value_assessment(mkt, t_dir)
+    val_str = ''
+    if val:
+        val_str = f"市场概率：{val['market_probs']}  |  边际：{val['margin']}  |  方向方隐含胜率：{val['dir_prob']}"
+
     jdg = TRADER_JUDGMENT
     TRADER_JUDGMENT = ''  # 用完重置
 
@@ -1371,6 +1419,7 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         'q2': q2,
         'q3': q3,
         'q4': q4,
+        'value': val_str,
         'trade_side': 'PASS',
         'product': '-',
         'size': '0%',
@@ -2029,6 +2078,11 @@ def _print(r, name):
         lines.append(f'  Q2 庄家为什么这样定价？ {ta.get("q2", "")}')
         lines.append(f'  Q3 庄家承担哪边风险？   {ta.get("q3", "")}')
         lines.append(f'  Q4 哪个结果最符合庄家赔付利益？ {ta.get("q4", "")}')
+        val = ta.get('value', '')
+        if val:
+            lines.append(f'')
+            lines.append(f'  📊 价值评估')
+            lines.append(f'  {val}')
         jdg = ta.get('judgment', '')
         if jdg:
             lines.append(f'')
