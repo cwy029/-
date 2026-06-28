@@ -1984,6 +1984,15 @@ def _print(r, name):
         f'  {name}',
         f'  {vi.get(conc, conc)}',
         '  ' + '━' * 50,
+    ]
+    # 第一层：🧮 庄家平衡（纯数据）
+    bal = r.get('盘口管理', [])
+    if bal:
+        for item in bal:
+            lines.append(f'    {item}')
+        lines.append('  ' + chr(0x2500) * 50)
+    # 第二层：系统结论（分析）
+    lines += [
         f'  方向 Direction:       {d}',
         f'  共识 Consensus:       {con}',
         f'  价格 Price:           {prc}',
@@ -2004,14 +2013,7 @@ def _print(r, name):
             if not s:
                 continue
             lines.append(f'  第{i+1}步 | {s}')
-    # 庄家平衡（第二层）
-    bal = r.get('盘口管理', [])
-    if bal:
-        lines.append('  ' + chr(0x2500) * 50)
-        lines.append('  🧮 庄家平衡')
-        for item in bal:
-            lines.append(f'    {item}')
-    # 盘口交易员视角（强制框架）
+    # 第三层：🎯 盘口交易员视角（判断）
     ta = r.get('交易决策', {})
     if ta:
         lines.append('  ' + chr(0x2500) * 50)
