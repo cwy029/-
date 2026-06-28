@@ -722,7 +722,7 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
     ah_str = f'{team}{sign}{_fmt(abs(bl))}'
     if best_w:
         ah_str += f' @{best_w:.2f}'
-    items = [f'推荐盘口：{ah_str}（{BK_LABEL.get(best_bk, "Pin")}）']
+    items = [f'参考盘口：{ah_str}（{BK_LABEL.get(best_bk, "Pin")}）']
 
     # ── 盘口拆解 ──
     ab = abs(bl)
@@ -790,17 +790,6 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
         else:
             label = f'{dir_label} 输 {abs(m)} 球'
         payout_scenarios.append((label, m))
-
-    # ── 庄家平衡：合拍度 + 破绽 ──
-    assess = evaluate_fit_and_flaw(mkt, dir_ah)
-    fit_detail = f'合拍度：{assess["fit"]}'
-    if assess['fit_reasons']:
-        fit_detail += f'（{", ".join(assess["fit_reasons"])}）'
-    items.append(fit_detail)
-    if assess['flaw']:
-        items.append(f'破绽：{", ".join(assess["flaws"])}')
-    else:
-        items.append('破绽：无明显破绽')
 
     # ── 庄家工具 ──
     tools = []
@@ -959,7 +948,12 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
         if dir_on_fav:
             comfort_margin = -1 if quarter == 0 else 0
         else:
-            comfort_margin = -(int(ab)+1) if quarter == 0 else -1
+            if quarter == 0:
+                comfort_margin = -(int(ab)+1)  # 整数盘多输一球 → 全输
+            elif quarter == 3:
+                comfort_margin = -(int(ab)+2)  # 0.75盘输穿盘线+1 → 全输
+            else:
+                comfort_margin = -1  # 半球/0.25盘输1球 → 全输
         score = make_score(comfort_margin)
         total = score[0] + score[1]
         ou_side = '大球' if total > ou_line else '小球' if total < ou_line else '走水'
@@ -1205,7 +1199,12 @@ def _comfortable_outcome(mkt, dir_ah, name):
     if dir_on_fav:
         margin = -1 if quarter == 0 else 0
     else:
-        margin = -(int(ab)+1) if quarter == 0 else -1
+        if quarter == 0:
+            margin = -(int(ab)+1)
+        elif quarter == 3:
+            margin = -(int(ab)+2)
+        else:
+            margin = -1
 
     margin = int(margin)
     if margin > 0:
@@ -1611,6 +1610,12 @@ def analyze(name, mkt):
         info.append(risk_reason)
         return _fin(result, risk_conc, risk_reason, info, flipped)
 
+    # ── 合拍度 + 破绽（系统结论的补充维度）──
+    _assess = evaluate_fit_and_flaw(mkt, dir_ah)
+    result['合拍度'] = _assess['fit']
+    result['合拍度理由'] = _assess['fit_reasons']
+    result['破绽'] = _assess['flaws']
+
     # ── ⑥ 最终决策（Final Decision）──
     # 第一层：系统结论快速分类
     if flipped:
@@ -1985,6 +1990,8 @@ def _print(r, name):
         f'  风险 Risk:            {rsk}',
         f'  大小球 OU:            {r.get("大小球","") or "-"}',
         f'  BC 方向温度:          {bm}' + (f'  [{bc_short}]' if bc_short else ''),
+        f'  合拍度:               {r.get("合拍度","—")}' + (f'  ({", ".join(r.get("合拍度理由",[]))})' if r.get('合拍度理由') else ''),
+        f'  破绽:                 {"、".join(r.get("破绽",[])) if r.get("破绽") else "无"}',
         '  ' + chr(0x2500) * 50,
         f'  结论：{reason}',
     ]
