@@ -650,125 +650,200 @@ def bookmaker_challenge(mkt, dir_ah, active, price_v, euro_v):
 # ═══════════════════════════════════════════
 
 def bookmaker_balance(mkt, dir_ah, flipped, name):
-    """盘口管理分析：拆线位结构、庄家工具、结算方式
-    不猜庄家意图，只描述盘口设置和赔付结构
-    返回 (push_line, items: list[str])
-    """
+    """庄家平衡：拆线位结构、庄家工具、赔付结构、最舒服结果"""
     def _line(bk, src):
         sp = src.get(bk, {}).get('Spread', {})
         v = next(iter(sp.values()), {}) if len(sp) == 1 else {}
         return _fl(v.get('line'))
 
+    def _water(bk, src, side):
+        sp = src.get(bk, {}).get('Spread', {})
+        v = next(iter(sp.values()), {}) if len(sp) == 1 else {}
+        return _fl(v.get(side))
+
     def _fmt(v):
         s = f'{abs(v):.2f}'.rstrip('0')
         return s[:-1] if s.endswith('.') else s
 
-    curr_pin = _line('Pinnacle', mkt.get('curr', {}))
-    snap_pin = _line('Pinnacle', mkt.get('snap', {}))
     home_name = name.split(' vs ')[0].strip()
     away_name = name.split(' vs ')[1].strip()
+    team = home_name if dir_ah == '+' else away_name
+    opp = away_name if dir_ah == '+' else home_name
+    dir_label = f'主队{home_name}' if dir_ah == '+' else f'客队{away_name}'
+    opp_label = f'客队{away_name}' if dir_ah == '+' else f'主队{home_name}'
+    wkey = 'home' if dir_ah == '+' else 'away'
 
-    ou_val = None
-    for bk in ['Pinnacle', 'Bet365']:
-        cv = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
-        if cv is not None:
-            ou_val = _fl(cv.get('line'))
+    # 推荐盘口 = 最深线位 + 对应水位
+    bl = _pick_deepest_line(mkt['curr'], dir_ah)
+    if bl is None:
+        return '', []
+
+    best_bk = None
+    best_w = None
+    for bk in BK_CORE:
+        sp = mkt.get('curr', {}).get(bk, {}).get('Spread', {})
+        v = next(iter(sp.values()), {}) if len(sp) == 1 else {}
+        ln = _fl(v.get('line'))
+        wt = _fl(v.get(wkey))
+        if ln is not None and wt is not None and abs(ln - bl) < 0.01:
+            best_bk = bk
+            best_w = wt
             break
 
-    items = []
-
-    if curr_pin is None:
-        return '', items
-
-    # ── 线位拆解 ──
-    ab = abs(curr_pin)
-    # 判断方向方是让球方还是受让方（基于线位符号）
-    dir_on_fav = False
-    if curr_pin != 0:
-        if dir_ah == '+' and curr_pin < 0:
-            dir_on_fav = True
-        elif dir_ah == '-' and curr_pin > 0:
-            dir_on_fav = True
-    team = home_name if dir_ah == '+' else away_name
+    dir_on_fav = (dir_ah == '+' and bl < 0) or (dir_ah == '-' and bl > 0)
     sign = '-' if dir_on_fav else '+'
+    ah_str = f'{team}{sign}{_fmt(abs(bl))}'
+    if best_w:
+        ah_str += f' @{best_w:.2f}'
+    items = [f'推荐盘口：{ah_str}（{BK_LABEL.get(best_bk, "Pin")}）']
 
-    # 拆解盘口结构
-    quarter = (ab * 4) % 4  # 0=整数盘, 1=0.25, 2=0.5, 3=0.75
+    # ── 盘口拆解 ──
+    ab = abs(bl)
+    quarter = round(ab * 4) % 4
     if quarter == 0:
-        split = f'{team}{sign}{_fmt(curr_pin)} = 整数盘，无拆分'
+        split = f'{team}{sign}{_fmt(ab)} = 整数盘（走水可退注）'
     elif quarter == 2:
-        split = f'{team}{sign}{_fmt(curr_pin)} = 半注{team}{sign}{_fmt(ab-0.25)} + 半注{team}{sign}{_fmt(ab+0.25)}'
+        split = f'{team}{sign}{_fmt(ab)} = 半球盘（无走水）'
     elif quarter == 1:
-        if abs(curr_pin) == 0.25:
-            split = f'{team}{sign}{_fmt(curr_pin)} = 半注{team}{sign}{_fmt(ab-0.25)} + 半注{team}0'
+        if ab == 0.25:
+            split = f'{team}{sign}{_fmt(ab)} = 半注{team}0 + 半注{team}{sign}0.5'
         else:
-            split = f'{team}{sign}{_fmt(curr_pin)} = 半注{team}{sign}{_fmt(ab-0.25)} + 半注{team}{sign}{_fmt(ab+0.25)}'
-    else:  # quarter == 3 (0.75)
-        split = f'{team}{sign}{_fmt(curr_pin)} = 半注{team}{sign}{_fmt(ab-0.25)} + 半注{team}{sign}{_fmt(ab+0.25)}'
+            split = f'{team}{sign}{_fmt(ab)} = 半注{team}{sign}{_fmt(ab-0.25)} + 半注{team}{sign}{_fmt(ab+0.25)}'
+    else:  # quarter == 3
+        split = f'{team}{sign}{_fmt(ab)} = 半注{team}{sign}{_fmt(ab-0.25)} + 半注{team}{sign}{_fmt(ab+0.25)}'
     items.append(split)
 
-    # ── 走水点/输半分析 ──
-    if quarter == 0:
-        items.append(f'走水点：{team} 赢 {_fmt(ab)} 球')
-    elif not dir_on_fav:
-        items.append(f'拆分：{team}{sign}{_fmt(curr_pin)} 受让方，1球差输半')
+    # ── 关键赛果 ──
+    scenarios = []
+    if dir_on_fav:
+        scenarios.append((f'{opp_label} 赢或平', -1))
+        if quarter == 0:
+            scenarios.append((f'{dir_label} 赢 {_fmt(ab)} 球 → 走水', int(ab)))
+            scenarios.append((f'{dir_label} 赢 {_fmt(ab+1)} 球 → 全收', int(ab)+1))
+        elif quarter == 2:
+            scenarios.append((f'{dir_label} 赢 {_fmt(int(ab)+1)} 球 → 全收', int(ab)+1))
+        elif quarter == 1:
+            scenarios.append((f'平局 → {dir_label} 输半', 0))
+            scenarios.append((f'{dir_label} 赢 {_fmt(int(ab)+1)} 球 → 全收', int(ab)+1))
+        else:  # quarter == 3
+            scenarios.append((f'{dir_label} 赢 {_fmt(int(ab)+1)} 球 → 赢半', int(ab)+1))
+            scenarios.append((f'{dir_label} 赢 {_fmt(int(ab)+2)} 球 → 全收', int(ab)+2))
     else:
-        items.append(f'输半线：{team} 赢 {_fmt(ab-0.25)} 球输一半，{team} 赢 {_fmt(ab+0.25)} 球全收')
+        scenarios.append((f'{dir_label} 赢或平 → 全收', 1))
+        if quarter == 0:
+            scenarios.append((f'{dir_label} 输 {_fmt(ab)} 球 → 走水', -int(ab)))
+            scenarios.append((f'{dir_label} 输 {_fmt(ab+1)} 球 → 全输', -(int(ab)+1)))
+        elif quarter == 2:
+            scenarios.append((f'{dir_label} 输 {_fmt(int(ab)+1)} 球 → 全输', -(int(ab)+1)))
+        elif quarter == 1:
+            scenarios.append((f'{dir_label} 输 {_fmt(int(ab)+1)} 球 → 全输', -(int(ab)+1)))
+        else:  # quarter == 3
+            scenarios.append((f'{dir_label} 输 {_fmt(int(ab)+1)} 球 → 输半', -(int(ab)+1)))
+            scenarios.append((f'{dir_label} 输 {_fmt(int(ab)+2)} 球 → 全输', -(int(ab)+2)))
 
-    # ── 庄家工具分析（线位/水位/欧赔变动） ──
+    for label, _ in scenarios:
+        items.append(f'关键赛果：{label}')
+
+    # 更丰富的赔付场景（比分更多）
+    if dir_on_fav:
+        payout_margins = list(range(-1, int(ab) + 3))  # -1, 0, 1, ..., ab+2
+    else:
+        payout_margins = list(range(-(int(ab) + 2), 2))  # -(ab+2), ..., -1, 0, 1
+
+    payout_scenarios = []
+    for m in payout_margins:
+        if m == -1:
+            label = f'{opp_label} 赢或平'
+        elif m == 0:
+            label = '平局'
+        elif m == 1:
+            label = f'{dir_label} 赢或平' if not dir_on_fav else f'{dir_label} 赢 1 球'
+        elif m > 1:
+            label = f'{dir_label} 赢 {m} 球'
+        else:
+            label = f'{dir_label} 输 {abs(m)} 球'
+        payout_scenarios.append((label, m))
+
+    # ── 庄家平衡：合拍度 + 破绽 ──
+    assess = evaluate_fit_and_flaw(mkt, dir_ah)
+    fit_detail = f'合拍度：{assess["fit"]}'
+    if assess['fit_reasons']:
+        fit_detail += f'（{", ".join(assess["fit_reasons"])}）'
+    items.append(fit_detail)
+    if assess['flaw']:
+        items.append(f'破绽：{", ".join(assess["flaws"])}')
+    else:
+        items.append('破绽：无明显破绽')
+
+    # ── 庄家工具 ──
     tools = []
 
     # 线位变动
-    if snap_pin is not None:
-        move = abs(curr_pin - snap_pin)
-        if move >= 0.25:
-            if curr_pin < snap_pin:
-                tools.append(f'推盘{_fmt(move)}格（{_fmt(snap_pin)} → {_fmt(curr_pin)}）')
-            else:
-                tools.append(f'退盘{_fmt(move)}格（{_fmt(snap_pin)} → {_fmt(curr_pin)}）')
-        else:
-            tools.append('线位不动')
+    line_moves = []
+    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('singbet', 'Crown')]:
+        sl = _line(bk, mkt.get('snap', {}))
+        cl = _line(bk, mkt.get('curr', {}))
+        if sl is not None and cl is not None:
+            move = round(abs(cl) - abs(sl), 2)
+            if abs(move) >= 0.25:
+                direction = '推盘' if move > 0 else '退盘'
+                line_moves.append(f'{label}{direction}{_fmt(abs(move))}({_fmt(sl)}→{_fmt(cl)})')
+    if line_moves:
+        tools.append(' | '.join(line_moves))
+    else:
+        tools.append('线位未动')
 
     # 水位变动
-    snap_sp = next(iter(mkt.get('snap', {}).get('Pinnacle', {}).get('Spread', {}).values()), {})
-    curr_sp = next(iter(mkt.get('curr', {}).get('Pinnacle', {}).get('Spread', {}).values()), {})
-    # 翻转后 dir_ah 已指向受让方，直接取方向方水位
-    wkey = 'home' if dir_ah == '+' else 'away'
-    snap_w = _fl(snap_sp.get(wkey))
-    curr_w = _fl(curr_sp.get(wkey))
-    if snap_w and curr_w and abs(curr_w - snap_w) >= 0.02:
-        diff = curr_w - snap_w
-        direction = '升' if diff > 0 else '降'
-        tools.append(f'水位{direction}{abs(diff):.2f}（{snap_w} → {curr_w}）')
+    water_moves = []
+    for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('singbet', 'Crown')]:
+        sw = _water(bk, mkt.get('snap', {}), wkey)
+        cw = _water(bk, mkt.get('curr', {}), wkey)
+        if sw and cw and abs(cw - sw) >= 0.02:
+            direction = '升' if cw > sw else '降'
+            water_moves.append(f'{label}{direction}{abs(cw-sw):.2f}({sw:.2f}→{cw:.2f})')
+    if water_moves:
+        tools.append(' | '.join(water_moves))
 
     # 欧赔变动
-    s_ml = _gm('Pinnacle', mkt.get('snap', {}))
-    c_ml = _gm('Pinnacle', mkt.get('curr', {}))
-    if s_ml and c_ml:
-        fav = 'home' if dir_ah == '+' else 'away'
-        snap_o = _fl(s_ml.get(fav))
-        curr_o = _fl(c_ml.get(fav))
+    euro_moves = []
+    for bk in BK_EURO:
+        s_ml = _gm(bk, mkt.get('snap', {}))
+        c_ml = _gm(bk, mkt.get('curr', {}))
+        if not s_ml or not c_ml:
+            continue
+        snap_o = _fl(s_ml.get(wkey))
+        curr_o = _fl(c_ml.get(wkey))
         if snap_o and curr_o:
             chg = (snap_o - curr_o) / snap_o
             if abs(chg) >= 0.02:
                 direction = '降' if chg > 0 else '涨'
-                tools.append(f'欧赔{direction}{abs(chg)*100:.0f}%（{snap_o} → {curr_o}）')
-            else:
-                tools.append('欧赔不动')
+                euro_moves.append(f'{BK_LABEL.get(bk,bk)}{direction}{abs(chg)*100:.0f}%')
+    if euro_moves:
+        tools.append(' | '.join(euro_moves))
 
-        # 平赔
-        draw_s = _fl(s_ml.get('draw'))
-        draw_c = _fl(c_ml.get('draw'))
-        if draw_s and draw_c:
-            dchg = (draw_s - draw_c) / draw_s
+    # 平赔变动
+    draw_moves = []
+    for bk in BK_EURO:
+        s_ml = _gm(bk, mkt.get('snap', {}))
+        c_ml = _gm(bk, mkt.get('curr', {}))
+        if not s_ml or not c_ml:
+            continue
+        ds = _fl(s_ml.get('draw'))
+        dc = _fl(c_ml.get('draw'))
+        if ds and dc:
+            dchg = (ds - dc) / ds
             if abs(dchg) >= 0.03:
-                dd = '降' if dchg > 0 else '涨'
-                tools.append(f'平赔{dd}{abs(dchg)*100:.0f}%')
+                direction = '降' if dchg > 0 else '涨'
+                draw_moves.append(f'{BK_LABEL.get(bk,bk)}{direction}{abs(dchg)*100:.0f}%')
+    if draw_moves:
+        tools.append(' | '.join(draw_moves))
 
-    if tools:
-        items.append('庄家工具：' + ' | '.join(tools))
+    if tools and not (len(tools) == 1 and tools[0].startswith('线位未动')):
+        items.append('庄家工具：')
+        for t in tools:
+            items.append(f'  - {t}')
 
-    # ── 大小球配合（始终输出） ──
+    # ── 大小球 ──
     ou_summary = []
     for bk, label in [('Pinnacle', 'Pin'), ('Bet365', '365'), ('singbet', 'Crown')]:
         sc = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
@@ -776,161 +851,632 @@ def bookmaker_balance(mkt, dir_ah, flipped, name):
         if sc and cc:
             sl = _fl(sc.get('line'))
             cl = _fl(cc.get('line'))
-            so = _fl(sc.get('home'))  # 大球水
+            so = _fl(sc.get('home'))
             co = _fl(cc.get('home'))
             if sl is not None and cl is not None and so is not None and co is not None:
-                line_chg = '升盘' if cl > sl else '退盘' if cl < sl else '线位不动'
+                line_chg = '升盘' if cl > sl else '退盘' if cl < sl else '不动'
                 water_chg = f"{'涨' if co > so else '降'}{abs(co-so):.2f}" if abs(co-so)>=0.02 else '水不动'
-                ou_summary.append(f'{label}{_fmt(sl)}→{_fmt(cl)}({line_chg},{water_chg})')
+                ou_summary.append(f'{label} {_fmt(sl)}→{_fmt(cl)}({line_chg},{water_chg})')
     if ou_summary:
         items.append('大小球：' + ' | '.join(ou_summary))
 
-    # ── 结算简表（4种典型赛果） ──
-    settlement = []
-    win_margin = ab  # 赢球数 = 盘口深度
-    if dir_on_fav:
-        # 让球方
-        if quarter == 0:
-            settlement.append(f'{team} 赢 {_fmt(ab)} 球 → 走水')
-            settlement.append(f'{team} 赢 {_fmt(ab+1)} 球 → 全收')
-        elif quarter == 2:
-            settlement.append(f'{team} 赢 {_fmt(ab+0.25)} 球 → 全收')
-            settlement.append(f'{team} 赢 {_fmt(ab-0.25)} 球 → 输半')
-        else:
-            settlement.append(f'{team} 赢 {_fmt(ab+0.25)} 球 → 全收')
-            settlement.append(f'{team} 赢 {_fmt(ab-0.25)} 球 → 输半')
-        settlement.append(f'{team} 输或平 → 全输')
-    else:
-        # 受让方
-        loss_margin = ab
-        settlement.append(f'{team} 赢或平 → 全收')
-        settlement.append(f'{team} 输 1 球 → 输半')
-        settlement.append(f'{team} 输 2 球 → 全输')
-
-    if settlement:
-        for s in settlement[:3]:
-            items.append(f'结算：{s}')
-
-    # ── 赔付结构表（赛果│亚盘│大小球│庄家结算） ──
-    pin_ou = None
-    for bk in ['Pinnacle']:
+    # ── 赔付结构（纯文本） ──
+    ou_line = ou_over_w = ou_under_w = None
+    for bk in ['Pinnacle', 'Bet365', 'singbet']:
         cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
         if cc:
-            pin_ou = _fl(cc.get('line'))
-    if pin_ou is not None and curr_pin is not None and dir_on_fav:
-        ou_ln = pin_ou
-        pin_ou_w = None
-        pin_un_w = None
-        for bk in ['Pinnacle']:
-            cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
-            if cc:
-                pin_ou_w = _fl(cc.get('home'))
-                pin_un_w = _fl(cc.get('under'))
-        
-        ah_line_str = f'{team}{sign}{_fmt(curr_pin)}'
-        ah_water = _fl(curr_sp.get(wkey))
-        
-        # 标题
-        items.append(f'  亚盘：{ah_line_str} @ {ah_water:.2f}' if ah_water else f'  亚盘：{ah_line_str}')
-        if pin_ou_w and pin_un_w:
-            items.append(f'  大小球：{_fmt(ou_ln)}（大球 {pin_ou_w:.2f} / 小球 {pin_un_w:.2f}）')
-        
-        # 表格表头
-        ah_label = f'亚盘({ah_line_str})'
-        ou_label = f'大小球({_fmt(ou_ln)})'
-        items.append(f'  | 赛果 | {ah_label:12s}| {ou_label:12s}| 庄家结算')
-        items.append(f'  |{"─"*8}|{"─"*14}|{"─"*14}|{"─"*10}')
-        
-        # 确定典型比分：基于让球方赢球数映射到具体比分
-        # 简单映射：赢球数→(主队进球,客队进球)
-        # 用 team 是让球方，假设对手=另一队
-        def gen_scores(win_margin):
-            """根据赢球数生成具体比分"""
-            if win_margin == 0:
-                return [('1-0'), ('2-1')]  # 赢1球
-            elif win_margin == 1:
-                return [('2-0'), ('3-1')]  # 赢2球
-            elif win_margin == 2:
-                return [('3-0'), ('4-1')]  # 赢3球
-            elif win_margin == 3:
-                return [('4-0'), ('5-1')]  # 赢4球
-            return []
-        
-        # 确定要展示的赢球数
-        margins_to_show = []
-        # 输/平
-        margins_to_show.append(('输或平', 0, '全输'))
-        # 输半线附近
-        if quarter == 0:
-            margins_to_show.append((f'赢{_fmt(ab)}球', ab, '走水'))
-            margins_to_show.append((f'赢{_fmt(ab+1)}球', ab+1, '全收'))
-            # 穿盘
-            if ab >= 1:
-                margins_to_show.append((f'赢{_fmt(ab+2)}球', ab+2, '全收'))
-        elif quarter == 2:
-            margins_to_show.append((f'赢{_fmt(ab-0.25)}球', ab-0.25, '输半'))
-            margins_to_show.append((f'赢{_fmt(ab+0.25)}球', ab+0.25, '全收'))
-            margins_to_show.append((f'赢{_fmt(ab+1.25)}球', ab+1.25, '全收'))
-        else:
-            margins_to_show.append((f'赢{_fmt(ab-0.25)}球', ab-0.25, '输半'))
-            margins_to_show.append((f'赢{_fmt(ab+0.25)}球', ab+0.25, '全收'))
-            margins_to_show.append((f'赢{_fmt(ab+1.25)}球', ab+1.25, '全收'))
-        
-        for label_text, win_goals, ah_result in margins_to_show:
-            # AH 结果
-            ah_short = ah_result
-            
-            # 大小球结果：用赢球数近似总进球
-            if win_goals == 0:
-                # 输或平，无法判断总进球
-                ou_short = '—'
-                settle = '净赚'
+            ou_line = _fl(cc.get('line'))
+            ou_over_w = _fl(cc.get('home'))
+            ou_under_w = _fl(cc.get('under'))
+            if ou_line is not None:
+                break
+
+    if ou_line is not None:
+        items.append(f'亚盘：{team}{sign}{_fmt(ab)} @ {best_w:.2f}' if best_w else f'亚盘：{team}{sign}{_fmt(ab)}')
+        if ou_over_w and ou_under_w:
+            items.append(f'大小球：{_fmt(ou_line)}（大球 {ou_over_w:.2f} / 小球 {ou_under_w:.2f}）')
+
+        def make_score(margin):
+            margin = int(margin)
+            if margin > 0:
+                return (margin + 1, 1) if dir_ah == '+' else (1, margin + 1)
+            elif margin < 0:
+                return (1, abs(margin) + 1) if dir_ah == '+' else (abs(margin) + 1, 1)
             else:
-                if win_goals > ou_ln + 0.01:
-                    ou_short = '大球'
-                elif win_goals < ou_ln - 0.01:
-                    ou_short = '小球'
-                else:
-                    ou_short = '走水'
-                # 庄家结算简单判断
-                if ah_short == '全输' and ou_short in ('小球', '—'):
-                    settle = '净赚'
-                elif ah_short == '全输' and ou_short == '大球':
-                    settle = '赚(OU赔)'
-                elif ah_short == '全收' and ou_short == '大球':
-                    settle = '净赔最大'
-                elif ah_short == '全收' and ou_short in ('小球', '走水'):
-                    settle = '赔方向方'
-                elif ah_short == '输半' and ou_short == '小球':
-                    settle = '微赚'
-                elif ah_short == '走水' and ou_short in ('小球', '走水'):
-                    settle = '赚(OU)'
-                else:
-                    settle = '—'
-            
-            items.append(f'  | {label_text:6s}| {ah_short:12s}| {ou_short:12s}| {settle}')
-        
-        # 庄家最舒服的比分总结
+                return (1, 1)
+
+        def ah_result(score):
+            hg, ag = score
+            net = hg - ag + bl if dir_ah == '+' else ag - hg - bl
+            if net > 0.25:
+                return '全收'
+            elif abs(net - 0.25) < 0.001:
+                return '赢半'
+            elif abs(net) < 0.001:
+                return '走水'
+            elif abs(net + 0.25) < 0.001:
+                return '输半'
+            else:
+                return '全输'
+
+        def ou_result(score):
+            total = score[0] + score[1]
+            if total > ou_line + 0.01:
+                return '大球'
+            elif total < ou_line - 0.01:
+                return '小球'
+            else:
+                return '走水'
+
+        def settle(ah, ou):
+            if ah == '全收':
+                return '庄家大赔' if ou == '大球' else '庄家中赔'
+            elif ah == '赢半':
+                return '庄家小赔'
+            elif ah == '走水':
+                return '庄家平衡' if ou in ('小球', '走水') else '庄家小赔'
+            elif ah == '输半':
+                return '庄家小赚' if ou == '小球' else '庄家小赔'
+            else:
+                return '庄家大赚' if ou in ('小球', '走水', '—') else '庄家小赚'
+
+        items.append('赔付结构：')
+        for label, margin in payout_scenarios:
+            score = make_score(margin)
+            ah = ah_result(score)
+            ou = ou_result(score)
+            st = settle(ah, ou)
+            items.append(f'  - {label} 比分 {score[0]}-{score[1]} → 亚盘{ah}，大小球{ou}，{st}')
+
+        # ── 庄家最舒服比分 ──
         if dir_on_fav:
-            # 最舒服：方向方赢球但不够穿盘 + 小球
-            # 穿盘线 = ab球（整数盘）或 ab-0.25球（非整数盘）
-            non_cover_max = int(ab) - (1 if quarter == 0 else 1)
-            if non_cover_max < 1:
-                non_cover_max = 1
-            # 总进球低于大小球线
-            ou_target = int(ou_ln) - 1 if ou_ln >= 2 else 1
-            if ou_target < 1:
-                ou_target = 1
-            items.append(f'  庄家最舒服比分：{team} 赢 {non_cover_max}-{ou_target} 球（AH全收散户穿盘注，大小球收小球注）')
+            comfort_margin = -1 if quarter == 0 else 0
+        else:
+            comfort_margin = -(int(ab)+1) if quarter == 0 else -1
+        score = make_score(comfort_margin)
+        total = score[0] + score[1]
+        ou_side = '大球' if total > ou_line else '小球' if total < ou_line else '走水'
+        ah = ah_result(score)
+        st = settle(ah, ou_side)
+        items.append(f'庄家最舒服比分：{score[0]}-{score[1]}（{st}，{ou_side}）')
 
     return '', items
 
 
 # ═══════════════════════════════════════════
-#  主分析
+#  ③ 交易员决策层（三明治法第三层）
+#  严格按 TRADING_FLOW.md 框架输出，无框架不输出
+# ═══════════════════════════════════════════
+#  ③ 盘口交易员视角（强制框架）
+#  最终目标：回答四个问题，最后给出庄家视角的交易建议。
+#  约束：不预测比赛结果，只预测盘口行为；证据不足则 PASS。
 # ═══════════════════════════════════════════
 
+def _fmt_line(v, dir_ah):
+    """从方向方视角格式化盘口线位"""
+    if v is None:
+        return ''
+    # 方向方视角：让球方用 '-'，受让方用 '+'
+    if dir_ah == '+':
+        sign = '-' if v < 0 else '+'
+    else:
+        sign = '-' if v > 0 else '+'
+    s = f'{abs(v):.2f}'.rstrip('0')
+    s = s[:-1] if s.endswith('.') else s
+    return f'{sign}{s}'
+
+
+def _fmt(v):
+    s = f'{abs(v):.2f}'.rstrip('0')
+    return s[:-1] if s.endswith('.') else s
+
+
+def _describe_bookmaker_action(mkt, dir_ah):
+    """Q1: 庄家现在在干什么？按动作类型汇总，避免冗长。"""
+    wkey = 'home' if dir_ah == '+' else 'away'
+    parts = []
+
+    # 亚盘线位
+    line_push = line_drop = 0
+    max_push = max_drop = 0.0
+    for bk in BK_CORE:
+        sp = mkt.get('snap', {}).get(bk, {}).get('Spread', {})
+        cv = mkt.get('curr', {}).get(bk, {}).get('Spread', {})
+        sv = next(iter(sp.values()), {}) if len(sp) == 1 else {}
+        cv_v = next(iter(cv.values()), {}) if len(cv) == 1 else {}
+        sl = _fl(sv.get('line'))
+        cl = _fl(cv_v.get('line'))
+        if sl is not None and cl is not None:
+            diff = round(abs(cl) - abs(sl), 2)
+            if diff >= 0.25:
+                line_push += 1
+                max_push = max(max_push, diff)
+            elif diff <= -0.25:
+                line_drop += 1
+                max_drop = max(max_drop, abs(diff))
+    if line_push and line_drop:
+        parts.append(f'亚盘分歧（{line_push}家推盘{_fmt(max_push)}、{line_drop}家退盘{_fmt(max_drop)}）')
+    elif line_push:
+        parts.append(f'亚盘推盘{_fmt(max_push)}（{line_push}家）')
+    elif line_drop:
+        parts.append(f'亚盘退盘{_fmt(max_drop)}（{line_drop}家）')
+
+    # 亚盘水位（方向方）
+    water_down = water_up = 0
+    max_wd = max_wu = 0.0
+    for bk in BK_CORE:
+        sp = mkt.get('snap', {}).get(bk, {}).get('Spread', {})
+        cv = mkt.get('curr', {}).get(bk, {}).get('Spread', {})
+        sv = next(iter(sp.values()), {}) if len(sp) == 1 else {}
+        cv_v = next(iter(cv.values()), {}) if len(cv) == 1 else {}
+        sw = _fl(sv.get(wkey))
+        cw = _fl(cv_v.get(wkey))
+        if sw and cw:
+            diff = round(cw - sw, 2)
+            if diff <= -0.03:
+                water_down += 1
+                max_wd = max(max_wd, abs(diff))
+            elif diff >= 0.03:
+                water_up += 1
+                max_wu = max(max_wu, diff)
+    if water_down and water_up:
+        parts.append(f'方向方水位分化（{water_down}家降水、{water_up}家升水）')
+    elif water_down:
+        parts.append(f'方向方降水{_fmt(max_wd)}（{water_down}家）')
+    elif water_up:
+        parts.append(f'方向方升水{_fmt(max_wu)}（{water_up}家）')
+
+    # 欧赔
+    euro_down = euro_up = 0
+    for bk in BK_EURO:
+        s_ml = _gm(bk, mkt.get('snap', {}))
+        c_ml = _gm(bk, mkt.get('curr', {}))
+        if s_ml and c_ml:
+            snap_o = _fl(s_ml.get(wkey))
+            curr_o = _fl(c_ml.get(wkey))
+            if snap_o and curr_o:
+                chg = (snap_o - curr_o) / snap_o
+                if chg >= 0.02:
+                    euro_down += 1
+                elif chg <= -0.02:
+                    euro_up += 1
+    if euro_down and euro_up:
+        parts.append('欧赔方向方分化')
+    elif euro_down:
+        parts.append(f'欧赔方向方降赔（{euro_down}家）')
+    elif euro_up:
+        parts.append(f'欧赔方向方涨赔（{euro_up}家）')
+
+    # 平赔
+    draw_up = draw_down = 0
+    for bk in BK_EURO:
+        s_ml = _gm(bk, mkt.get('snap', {}))
+        c_ml = _gm(bk, mkt.get('curr', {}))
+        if s_ml and c_ml:
+            ds = _fl(s_ml.get('draw'))
+            dc = _fl(c_ml.get('draw'))
+            if ds and dc:
+                if dc > ds * 1.03:
+                    draw_up += 1
+                elif dc < ds * 0.97:
+                    draw_down += 1
+    if draw_up and draw_down:
+        parts.append('平赔分化')
+    elif draw_up >= 2:
+        parts.append(f'平赔涨（{draw_up}家）')
+    elif draw_down >= 2:
+        parts.append(f'平赔降（{draw_down}家）')
+    elif draw_up:
+        parts.append('平赔涨')
+    elif draw_down:
+        parts.append('平赔降')
+
+    # 大小球
+    ou_push = ou_drop = 0
+    ou_water_up = ou_water_down = 0
+    for bk in BK_CORE:
+        sc = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
+        cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+        if sc and cc:
+            sl = _fl(sc.get('line'))
+            cl = _fl(cc.get('line'))
+            so = _fl(sc.get('home'))
+            co = _fl(cc.get('home'))
+            if sl is not None and cl is not None:
+                if cl > sl:
+                    ou_push += 1
+                elif cl < sl:
+                    ou_drop += 1
+            if so and co:
+                diff = round(co - so, 2)
+                if diff >= 0.03:
+                    ou_water_up += 1
+                elif diff <= -0.03:
+                    ou_water_down += 1
+    ou_parts = []
+    if ou_push and ou_drop:
+        ou_parts.append('大小球升降盘分歧')
+    elif ou_push:
+        ou_parts.append(f'大小球升盘（{ou_push}家）')
+    elif ou_drop:
+        ou_parts.append(f'大小球退盘（{ou_drop}家）')
+    if ou_water_up and ou_water_down:
+        ou_parts.append('大球水位分化')
+    elif ou_water_up:
+        ou_parts.append(f'大球升水（{ou_water_up}家）')
+    elif ou_water_down:
+        ou_parts.append(f'大球降水（{ou_water_down}家）')
+    if ou_parts:
+        parts.append('、'.join(ou_parts))
+
+    if not parts:
+        return '盘口整体未动，庄家没有明显动作'
+    return '；'.join(parts)
+
+
+def _explain_pricing(q1, mkt, dir_ah, price_v):
+    """Q2: 庄家为什么这样定价？"""
+    bl = _pick_deepest_line(mkt['curr'], dir_ah)
+    dir_on_fav = False
+    if bl is not None:
+        dir_on_fav = (dir_ah == '+' and bl < 0) or (dir_ah == '-' and bl > 0)
+    ou_dir, ou_desc = check_ou(mkt)
+
+    if '诱盘' in (ou_desc or ''):
+        return f'大小球{ou_dir}出现价量背离，庄家在诱{ou_dir}，实际方向应与{ou_dir}相反'
+    if '平赔骤降' in q1 or '平赔降' in q1:
+        side = '让球方' if dir_on_fav else '受让方'
+        return f'平赔下降说明庄家在承接平局资金，{side}穿盘风险被低估'
+    if '亚盘推盘' in q1 and '方向方降水' in q1 and '欧赔方向方降赔' in q1:
+        return '亚盘推盘+方向方降水+欧赔降赔三线同步，庄家真看好方向方'
+    if '亚盘推盘' in q1 and '方向方升水' in q1:
+        return '亚盘推盘但方向方水位上升，庄家让利吸筹，更可能是平衡资金而非真看好'
+    if '亚盘退盘' in q1 and '方向方降水' in q1:
+        return '亚盘退盘+方向方降水，庄家主动降低门槛并降价，诱导资金进入方向方'
+    if '平赔涨' in q1 and '欧赔方向方降赔' in q1:
+        return '平赔涨+方向方赔率降，庄家不愿接平局资金，方向方赢面被市场认可'
+    if '盘口整体未动' in q1:
+        return '盘口未动，庄家对当前定价满意，没有明显引导资金的意图'
+    return '庄家动作相互抵消，定价意图不明确'
+
+
+def _bookmaker_risk(mkt, dir_ah, q1, q2):
+    """Q3: 庄家现在承担哪边风险？"""
+    bl = _pick_deepest_line(mkt['curr'], dir_ah)
+    dir_on_fav = False
+    if bl is not None:
+        dir_on_fav = (dir_ah == '+' and bl < 0) or (dir_ah == '-' and bl > 0)
+    side = '让球方' if dir_on_fav else '受让方'
+    opp_side = '受让方' if dir_on_fav else '让球方'
+
+    if '方向方降水' in q1 or '欧赔方向方降赔' in q1 or '亚盘推盘' in q1:
+        return f'庄家在接{side}资金，当前主要承担{side}赢盘的风险'
+    if '方向方升水' in q1 or '欧赔方向方涨赔' in q1 or '亚盘退盘' in q1:
+        return f'庄家在让利{side}，实际更担心{opp_side}打出'
+    if '诱' in q2:
+        return f'庄家在诱散户去错误方向，真实风险在{opp_side}'
+    return '庄家没有明显单边敞口，当前风险较平衡'
+
+
+def _comfortable_outcome(mkt, dir_ah, name):
+    """Q4: 哪个结果最符合庄家的赔付利益？"""
+    bl = _pick_deepest_line(mkt['curr'], dir_ah)
+    if bl is None:
+        return None, None
+    ab = abs(bl)
+    quarter = round(ab * 4) % 4
+    dir_on_fav = (dir_ah == '+' and bl < 0) or (dir_ah == '-' and bl > 0)
+
+    ou_line = None
+    for bk in ['Pinnacle', 'Bet365', 'singbet']:
+        cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+        if cc:
+            ou_line = _fl(cc.get('line'))
+            if ou_line is not None:
+                break
+
+    if dir_on_fav:
+        margin = -1 if quarter == 0 else 0
+    else:
+        margin = -(int(ab)+1) if quarter == 0 else -1
+
+    margin = int(margin)
+    if margin > 0:
+        score = (margin + 1, 1) if dir_ah == '+' else (1, margin + 1)
+    elif margin < 0:
+        score = (1, abs(margin) + 1) if dir_ah == '+' else (abs(margin) + 1, 1)
+    else:
+        score = (1, 1)
+
+    if ou_line is not None:
+        total = score[0] + score[1]
+        ou_side = '大球' if total > ou_line else '小球' if total < ou_line else '走水'
+    else:
+        ou_side = '—'
+
+    return score, ou_side
+
+
+def evaluate_fit_and_flaw(mkt, dir_ah):
+    """第二层：庄家平衡 —— 合拍度 + 破绽"""
+    bl = _pick_deepest_line(mkt['curr'], dir_ah)
+    dir_on_fav = False
+    if bl is not None:
+        dir_on_fav = (dir_ah == '+' and bl < 0) or (dir_ah == '-' and bl > 0)
+
+    # ── 合拍度 ──
+    draw_up = draw_down = 0
+    for bk in BK_EURO:
+        s_ml = _gm(bk, mkt.get('snap', {}))
+        c_ml = _gm(bk, mkt.get('curr', {}))
+        if s_ml and c_ml:
+            ds = _fl(s_ml.get('draw'))
+            dc = _fl(c_ml.get('draw'))
+            if ds and dc:
+                if dc > ds * 1.03:
+                    draw_up += 1
+                elif dc < ds * 0.97:
+                    draw_down += 1
+
+    ou_dir, ou_desc = check_ou(mkt)
+    ou_is_trap = ou_desc and '诱盘' in ou_desc
+    ou_strong = ou_dir in ('大球', '小球') and not ou_is_trap
+
+    score = 0
+    fit_reasons = []
+
+    if draw_up >= 2:
+        score += 1
+        fit_reasons.append('平赔涨')
+    if draw_down >= 3:
+        score -= 2
+        fit_reasons.append('平赔骤降')
+    elif draw_down >= 2:
+        score -= 1
+        fit_reasons.append('平赔跌')
+
+    if ou_dir:
+        if dir_on_fav and ou_dir == '大球' and ou_strong:
+            score += 1
+            fit_reasons.append('AH/OU同向')
+        elif dir_on_fav and ou_dir == '小球' and ou_strong:
+            score -= 1
+            fit_reasons.append('AH/OU矛盾')
+        elif not dir_on_fav and ou_dir == '小球' and ou_strong:
+            score += 1
+            fit_reasons.append('AH/OU同向')
+        elif not dir_on_fav and ou_dir == '大球' and ou_strong:
+            score -= 1
+            fit_reasons.append('AH/OU矛盾')
+
+    if score >= 1:
+        fit = '合拍'
+    elif score <= -1:
+        fit = '矛盾'
+    else:
+        fit = '中性'
+
+    # ── 破绽 ──
+    flaws = []
+    if ou_is_trap:
+        flaws.append(f'O/U诱盘({ou_dir})')
+
+    # 亚盘滞后定价
+    lines = {}
+    for bk in BK_CORE:
+        ln = _ln(bk, mkt.get('curr', {}))
+        if ln is not None:
+            lines[bk] = ln
+    if len(lines) >= 2:
+        vals = sorted(lines.values())
+        median = vals[len(vals) // 2]
+        for bk, ln in lines.items():
+            if abs(ln - median) >= 0.5:
+                flaws.append(f'{BK_LABEL[bk]}滞后定价')
+                break
+
+    # 大小球跨庄差≥0.5
+    ou_lines = {}
+    for bk in BK_CORE:
+        cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+        if cc:
+            ln = _fl(cc.get('line'))
+            if ln is not None:
+                ou_lines[bk] = ln
+    if len(ou_lines) >= 2:
+        vals = list(ou_lines.values())
+        if max(vals) - min(vals) >= 0.5:
+            flaws.append('O/U跨庄差≥0.5')
+
+    return {
+        'fit': fit,
+        'fit_reasons': fit_reasons,
+        'flaw': len(flaws) > 0,
+        'flaws': flaws,
+    }
+
+
+def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
+    """
+    第三层：盘口交易员视角。
+    强制回答四个问题，最后给出庄家视角的交易建议。
+    证据不足 → 推荐 PASS。
+    """
+    home_name = name.split(' vs ')[0].strip()
+    away_name = name.split(' vs ')[1].strip()
+    team = home_name if dir_ah == '+' else away_name
+    opp = away_name if dir_ah == '+' else home_name
+    wkey = 'home' if dir_ah == '+' else 'away'
+
+    bl = _pick_deepest_line(mkt['curr'], dir_ah)
+    dir_on_fav = False
+    if bl is not None:
+        dir_on_fav = (dir_ah == '+' and bl < 0) or (dir_ah == '-' and bl > 0)
+
+    # Q1-Q4
+    q1 = _describe_bookmaker_action(mkt, dir_ah)
+    q2 = _explain_pricing(q1, mkt, dir_ah, price_v)
+    q3 = _bookmaker_risk(mkt, dir_ah, q1, q2)
+    comfort_score, comfort_ou = _comfortable_outcome(mkt, dir_ah, name)
+    q4 = f'{comfort_score[0]}-{comfort_score[1]}（AH收方向注，{comfort_ou}）' if comfort_score else '无法判断'
+
+    # 证据强度检查
+    ou_dir, ou_desc = check_ou(mkt)
+    has_clear_signal = ('推盘' in q1 or '退盘' in q1 or '降水' in q1 or '升水' in q1 or
+                        '降赔' in q1 or '涨赔' in q1 or '平赔' in q1 or
+                        (ou_dir in ('大球', '小球')))
+
+    # 默认：证据不足 PASS
+    trade_side = 'PASS'
+    product = '-'
+    size = '0%'
+    reason = '盘口证据不足，禁止猜测'
+
+    if system_conc == 'PASS':
+        trade_side = 'PASS'
+        reason = '系统PASS，跳过'
+    elif not has_clear_signal:
+        trade_side = 'PASS'
+        reason = '盘口无明确动作，证据不足，PASS'
+    else:
+        # 从庄家视角找交易价值
+        # 1. OU 诱盘：做反方向
+        if ou_dir and '诱盘' in (ou_desc or ''):
+            fade_side = '小球' if ou_dir == '大球' else '大球'
+            # 选O/U线
+            ou_line, ou_over, ou_under, ou_bk = None, None, None, None
+            for bk in ['Pinnacle', 'Bet365', 'singbet']:
+                cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+                if cc:
+                    ou_line = _fl(cc.get('line'))
+                    ou_over = _fl(cc.get('home'))
+                    ou_under = _fl(cc.get('under'))
+                    ou_bk = BK_LABEL.get(bk, bk)
+                    if ou_line is not None:
+                        break
+            water = ou_under if fade_side == '小球' else ou_over
+            if water:
+                product = f'{fade_side[0]}{ou_line} @{water:.2f} ({ou_bk})'
+            else:
+                product = f'{fade_side[0]}{ou_line} ({ou_bk})'
+            trade_side = fade_side
+            size = '10-15%'
+            reason = f'庄家诱{ou_dir}，反打{fade_side}'
+
+        # 2. 推盘+降水+降赔 = 跟方向方
+        elif '推盘' in q1 and '降水' in q1 and '降赔' in q1 and price_v != '偏贵':
+            # 找方向方最优水位
+            best_bk = None
+            best_w = None
+            for bk in BK_CORE:
+                sp = mkt.get('curr', {}).get(bk, {}).get('Spread', {})
+                v = next(iter(sp.values()), {}) if len(sp) == 1 else {}
+                ln = _fl(v.get('line'))
+                wt = _fl(v.get(wkey))
+                if ln is not None and wt is not None and abs(ln - bl) < 0.01:
+                    best_bk = bk
+                    best_w = wt
+                    break
+            product = f'{team}{_fmt_line(bl, dir_ah)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})' if best_w else f'{team}{_fmt_line(bl, dir_ah)}'
+            trade_side = team
+            size = '15-20%'
+            reason = '庄家三线同步确认方向方，价格未过热，跟盘'
+
+        # 3. 推盘+升水 = 诱盘，反方向方
+        elif '推盘' in q1 and '升水' in q1:
+            product = f'{opp}{_fmt_line(bl, "+" if dir_ah == "-" else "-") if bl else ""}'
+            trade_side = opp
+            size = '10-15%'
+            reason = '推盘但升水让利，庄家诱方向方，反打对方'
+
+        # 4. 平赔骤降 = 方向方风险大，转受让方或O/U
+        elif '平赔降' in q1 or '平赔骤降' in q1:
+            if ou_dir in ('大球', '小球'):
+                ou_line, ou_over, ou_under, ou_bk = None, None, None, None
+                for bk in ['Pinnacle', 'Bet365', 'singbet']:
+                    cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+                    if cc:
+                        ou_line = _fl(cc.get('line'))
+                        ou_over = _fl(cc.get('home'))
+                        ou_under = _fl(cc.get('under'))
+                        ou_bk = BK_LABEL.get(bk, bk)
+                        if ou_line is not None:
+                            break
+                side = '大' if ou_dir == '大球' else '小'
+                water = ou_over if ou_dir == '大球' else ou_under
+                if water:
+                    product = f'{side}{ou_line} @{water:.2f} ({ou_bk})'
+                else:
+                    product = f'{side}{ou_line} ({ou_bk})'
+                trade_side = ou_dir
+                size = '10-15%'
+                reason = '平赔下降，方向方赢面存疑，转O/U'
+            else:
+                product = f'{opp}{_fmt_line(bl, "+" if dir_ah == "-" else "-") if bl else ""}'
+                trade_side = opp
+                size = '5-10%'
+                reason = '平赔下降，方向方风险上升，小注对方'
+
+        # 5. 价格偏贵 + 有OU信号 = 放弃AH转O/U
+        elif price_v == '偏贵' and ou_dir in ('大球', '小球'):
+            ou_line, ou_over, ou_under, ou_bk = None, None, None, None
+            for bk in ['Pinnacle', 'Bet365', 'singbet']:
+                cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+                if cc:
+                    ou_line = _fl(cc.get('line'))
+                    ou_over = _fl(cc.get('home'))
+                    ou_under = _fl(cc.get('under'))
+                    ou_bk = BK_LABEL.get(bk, bk)
+                    if ou_line is not None:
+                        break
+            side = '大' if ou_dir == '大球' else '小'
+            water = ou_over if ou_dir == '大球' else ou_under
+            if water:
+                product = f'{side}{ou_line} @{water:.2f} ({ou_bk})'
+            else:
+                product = f'{side}{ou_line} ({ou_bk})'
+            trade_side = ou_dir
+            size = '10-15%'
+            reason = 'AH偏贵，放弃方向方，转O/U'
+
+        # 6. 默认：价格合理跟方向方
+        elif price_v == '合理':
+            best_bk = None
+            best_w = None
+            for bk in BK_CORE:
+                sp = mkt.get('curr', {}).get(bk, {}).get('Spread', {})
+                v = next(iter(sp.values()), {}) if len(sp) == 1 else {}
+                ln = _fl(v.get('line'))
+                wt = _fl(v.get(wkey))
+                if ln is not None and wt is not None and abs(ln - bl) < 0.01:
+                    best_bk = bk
+                    best_w = wt
+                    break
+            product = f'{team}{_fmt_line(bl, dir_ah)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})' if best_w else f'{team}{_fmt_line(bl, dir_ah)}'
+            trade_side = team
+            size = '10-15%'
+            reason = '价格合理，按方向方小注跟进'
+
+        # 7. 其他情况证据不足
+        else:
+            trade_side = 'PASS'
+            reason = '盘口证据不足以支撑明确交易，PASS'
+
+    return {
+        'q1': q1,
+        'q2': q2,
+        'q3': q3,
+        'q4': q4,
+        'trade_side': trade_side,
+        'product': product,
+        'size': size,
+        'reason': reason,
+    }
+
+
 def analyze(name, mkt):
+
+
     result = {'name': name}
     info = []  # 信息项，不影响结论
     verdicts = []  # 各步判定摘要
@@ -1018,7 +1564,7 @@ def analyze(name, mkt):
             result['_bl'] = _pick_deepest_line(mkt['curr'], dir_ah)
             result['翻转类型'] = '让球方→受让方'
         else:
-            info.append(f'平局信号（{src_name}），方向方已是受让方，无需翻转')
+            info.append(f'平局信号（{src_name}），方向已在受让方，无需翻转')
             verdicts.append('平局信号（无需翻转）')
 
     # 欧赔检查
@@ -1070,28 +1616,44 @@ def analyze(name, mkt):
         return _fin(result, risk_conc, risk_reason, info, flipped)
 
     # ── ⑥ 最终决策（Final Decision）──
+    # 第一层：系统结论快速分类
     if flipped:
-        # 翻转后若欧赔仍反对，说明新方向也缺乏支持，直接PASS
         if euro_v == '反对':
-            return _fin(result, 'PASS', '翻转后欧赔仍反对', info, flipped)
-        return _fin(result, 'WATCHLIST', '翻转·价格确认', info, flipped)
-    if euro_v == '反对':
-        return _fin(result, 'PASS', '共识否决：欧赔反对', info)
-    if euro_v == '中性':
-        return _fin(result, 'WATCHLIST', '共识中立', info)
-    # 方向过弱：仅一家变盘，即便欧赔支持、价格合理，也不值得EXECUTE
-    if qual == '偏弱':
-        return _fin(result, 'WATCHLIST', '方向偏弱：仅单家变盘', info)
-    if bc_level in ('过热', '关注'):
-        return _fin(result, 'WATCHLIST', f'BC{bc_level}：{bc_reason}', info, flipped)
-    return _fin(result, 'EXECUTE', '方向明确·共识支持·价格确认', info)
+            system_conc = 'PASS'
+            system_reason = '翻转后欧赔仍反对'
+        else:
+            system_conc = 'WATCHLIST'
+            system_reason = '翻转·价格确认'
+    elif euro_v == '反对':
+        system_conc = 'PASS'
+        system_reason = '共识否决：欧赔反对'
+    elif euro_v == '中性':
+        system_conc = 'WATCHLIST'
+        system_reason = '共识中立'
+    elif qual == '偏弱':
+        system_conc = 'WATCHLIST'
+        system_reason = '方向偏弱：仅单家变盘'
+    elif bc_level in ('过热', '关注'):
+        system_conc = 'WATCHLIST'
+        system_reason = f'BC{bc_level}：{bc_reason}'
+    else:
+        system_conc = 'EXECUTE'
+        system_reason = '方向明确·共识支持·价格确认'
+
+    # 第三层：交易员决策（严格按 TRADING_FLOW.md 框架，无框架不输出）
+    trading = trader_analysis(mkt, dir_ah, system_conc, price_v, name)
+    info.append(f'交易员决策：{trading["reason"]}')
+
+    return _fin(result, system_conc, system_reason, info, flipped, trading)
 
 
-def _fin(result, conclusion, reason, info, flipped=False):
+def _fin(result, conclusion, reason, info, flipped=False, trading=None):
     result['结论'] = conclusion
     result['理由'] = reason
     result['说明'] = '；'.join(info) if info else reason
     result['翻转'] = flipped
+    if trading is not None:
+        result['交易决策'] = trading
     return result
 
 
@@ -1432,13 +1994,32 @@ def _print(r, name):
         lines.append(f'  亚盘投票 => {sig}')
     if note and note != reason:
         lines.append(f'  → {note}')
-    # 盘口管理
+    # 庄家平衡（第二层）
     bal = r.get('盘口管理', [])
     if bal:
         lines.append('  ' + chr(0x2500) * 50)
-        lines.append('  📐 盘口管理（Line Management）')
+        lines.append('  🧮 庄家平衡')
         for item in bal:
             lines.append(f'    {item}')
+    # 盘口交易员视角（强制框架）
+    ta = r.get('交易决策', {})
+    if ta:
+        lines.append('  ' + chr(0x2500) * 50)
+        lines.append('  🎯 盘口交易员视角（强制框架）')
+        lines.append(f'  Q1 庄家现在在干什么？   {ta.get("q1", "")}')
+        lines.append(f'  Q2 庄家为什么这样定价？ {ta.get("q2", "")}')
+        lines.append(f'  Q3 庄家承担哪边风险？   {ta.get("q3", "")}')
+        lines.append(f'  Q4 哪个结果最符合庄家赔付利益？ {ta.get("q4", "")}')
+        lines.append('')
+        trade_side = ta.get('trade_side', 'PASS')
+        product = ta.get('product', '-')
+        if product and product != '-':
+            lines.append(f'  站在庄家视角：{trade_side} 更值得交易')
+            lines.append(f'  推荐标的：{product}')
+            lines.append(f'  建议仓位：{ta["size"]}')
+        else:
+            lines.append(f'  站在庄家视角：无明确交易方向（PASS）')
+        lines.append(f'  决策依据：{ta.get("reason", "")}')
     for l in lines:
         print(l)
 
