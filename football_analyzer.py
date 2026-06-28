@@ -2103,14 +2103,15 @@ def _print(r, name):
     _q4_parts = []
     if any('分歧' in b for b in bal):
         _q4_parts.append('⚠ 跨庄分歧')
+    import re
     for b in bal:
-        if '涨0.' in b or '降0.' in b:
+        # 匹配 升0.XX 或 降0.XX 或 涨0.XX 模式
+        for m in re.finditer(r'(?:升|降|涨)0\.(\d+)', b):
             try:
-                s = b.split('涨0.')[1].split('(')[0].strip() if '涨0.' in b else ''
-                if not s and '降0.' in b:
-                    s = b.split('降0.')[1].split('(')[0].strip()
-                if s and float(s) >= 0.30:
+                val = float('0.' + m.group(1))
+                if val >= 0.30:
                     _q4_parts.append('⚠ 极端水位(≥0.30)')
+                    break
             except: pass
     if any('诱' in b for b in bal):
         _q4_parts.append('⚠ 诱导信号')
