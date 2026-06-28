@@ -2125,7 +2125,11 @@ def _print(r, name):
 
     if jdg:
         lines.append(f'')
-        lines.append(f'  {jdg}')
+        lines.append(f'  🧑‍💼 交易员判断')
+        for line in jdg.split('\n'):
+            line = line.strip()
+            if line:
+                lines.append(f'  {line}')
 
     for l in lines:
         print(l)
