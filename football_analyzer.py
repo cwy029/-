@@ -2070,13 +2070,22 @@ def _print(r, name):
 
     lines.append('')
 
-    # ── 🎯 盘口交易员判断 ──
-    lines.append('━━━ 🎯 盘口交易员判断━━━')
+    # ── 🎯 盘口交易员判断（Q1-Q4 + 人工判断） ──
+    lines.append('━━━ 🎯 盘口交易员判断（Q1-Q4 + 人工判断）━━━')
     ta = r.get('交易决策', {})
     val = ta.get('value', '') if ta else ''
     jdg = ta.get('judgment', '') if ta else ''
     if val:
         lines.append(f'  📊 {val}')
+    # 直接从庄家平衡和原始数据推导 Q1-Q4，不引用系统结论
+    bal = r.get('盘口管理', [])
+    _tools = [b for b in bal if '推盘' in b or '退盘' in b or '升水' in b or '降水' in b]
+    _line_info = next((b for b in bal if '=' in b and '盘' in b), '')
+    _flaws = r.get('破绽', [])
+    lines.append(f'  Q1 方向投票数据：{r.get("信号", "—")}  方向：{r.get("_best_line", "—")}')
+    lines.append(f'  Q2 盘口变化：{_tools[0] if _tools else "无线位变动"}')
+    lines.append(f'  Q3 价格评估：{r.get("价格","—")}  {"（方向方水位变动见庄家平衡）" if any("升水" in b or "降水" in b for b in bal) else ""}')
+    lines.append(f'  Q4 异常检测：{"、".join(_flaws) if _flaws else "无"}')
     if jdg:
         lines.append(f'')
         lines.append(f'  {jdg}')
