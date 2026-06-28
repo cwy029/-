@@ -2070,8 +2070,8 @@ def _print(r, name):
 
     lines.append('')
 
-    # ── 🎯 盘口交易员视角（强制思考流程） ──
-    lines.append('━━━ 🎯 盘口交易员视角（强制思考流程）━━━')
+    # ── 🎯 盘口交易员判断 ──
+    lines.append('━━━ 🎯 盘口交易员判断━━━')
     ta = r.get('交易决策', {})
     val = ta.get('value', '') if ta else ''
     jdg = ta.get('judgment', '') if ta else ''
