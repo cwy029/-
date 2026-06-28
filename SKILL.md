@@ -74,9 +74,10 @@ version: 9.1.0
 - 是否存在价量背离、诱盘、异常水位？
 - 自反性检查：我是否有反方顾虑？
 
-#### Q5. 值得交易吗？（EXECUTE / WATCHLIST / PASS）
-- 综合 Q1~Q4，仅回答：EXECUTE / WATCHLIST / PASS
+#### Q5. EXECUTE or PASS？
+- 综合 Q1~Q4，仅回答：EXECUTE / PASS
 - 说明唯一原因
+- ❌ 不允许 WATCHLIST 或「人工判断」等模糊结论
 
 #### ⛔ Self-check（输出前必须完成）
 ① 我的结论是否完全来自赔率数据？——如果不是，删除非赔率依据。
