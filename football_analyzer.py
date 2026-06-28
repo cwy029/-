@@ -1612,8 +1612,7 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
 
 
 def analyze(name, mkt):
-
-
+    _normalize_ah_lines(mkt)
     result = {'name': name}
     info = []  # 信息项，不影响结论
     verdicts = []  # 各步判定摘要
@@ -2022,60 +2021,58 @@ def _parse_md(text):
                 j += 1
 
             if curr:
-                # ── HK→EU 水位修正 ──
-                # 针对 _fl 无法处理的 1.00 等边界值，强制 0.50~1.50 水位加 1.0
-                def _hk_fix(val):
-                    if isinstance(val, dict):
-                        return {k: _hk_fix(v) for k, v in val.items()}
-                    if isinstance(val, (int, float)) and 0.50 < val < 1.50:
-                        return round(val + 1.0, 2)
-                    return val
-                for bk_data in [curr, snap]:
-                    for bk, v in bk_data.items():
-                        for sec in ['Spread', 'Totals']:
-                            if sec in v:
-                                v[sec] = _hk_fix(v[sec])
-
-                # ── AH 线位归一化 ──
-                # 某些数据源线位从让球方角度列（非主队角度）
-                # 对比 ML 赔率判断实际让球方，需要时翻转线位
-                ml_fav_is_home = None
-                for bk_data in [curr, snap]:
-                    for bk, v in bk_data.items():
-                        ml = v.get('ML', {}).get('1', {})
-                        h = _fl(ml.get('home'))
-                        a = _fl(ml.get('away'))
-                        if h and a:
-                            # 主队赔率低 → 主队是让球方
-                            inferred = h < a
-                            if ml_fav_is_home is None:
-                                ml_fav_is_home = inferred
-                            elif ml_fav_is_home != inferred:
-                                # 跨庄不一致，无法判断，跳过归一化
-                                ml_fav_is_home = None
-                                break
-                    if ml_fav_is_home is None:
-                        break
-                if ml_fav_is_home is not None:
-                    for bk_data in [curr, snap]:
-                        for bk, v in bk_data.items():
-                            sp = v.get('Spread', {})
-                            for k, s in list(sp.items()):
-                                ln = s.get('line')
-                                if ln is not None:
-                                    ah_fav_is_home = ln < 0
-                                    if ah_fav_is_home != ml_fav_is_home:
-                                        # 翻转线位：取反并交换主客水
-                                        s['line'] = -ln
-                                        hw, aw = s.get('home'), s.get('away')
-                                        if hw is not None and aw is not None:
-                                            s['home'], s['away'] = aw, hw
+                _normalize_ah_lines({'curr': curr, 'snap': snap})
+                _normalize_ah_lines({'curr': curr, 'snap': snap})
                 matches.append({'name': name, 'curr': curr, 'snap': snap})
             i = j
             continue
         i += 1
 
     return matches
+
+
+def _normalize_ah_lines(mkt):
+    """AH 线位归一化：根据 ML 赔率判断让球方，需要时翻转线位"""
+    snap = mkt.get('snap', {})
+    curr = mkt.get('curr', {})
+    ml_fav_is_home = None
+    for bk_data in [curr, snap]:
+        for bk, v in bk_data.items():
+            ml = v.get('ML', {}).get('1', {})
+            h = _fl(ml.get('home'))
+            a = _fl(ml.get('away'))
+            if h and a:
+                inferred = h < a
+                if ml_fav_is_home is None:
+                    ml_fav_is_home = inferred
+                elif ml_fav_is_home != inferred:
+                    ml_fav_is_home = None
+                    break
+        if ml_fav_is_home is None:
+            break
+    if ml_fav_is_home is not None:
+        for bk_data in [curr, snap]:
+            for bk, v in bk_data.items():
+                sp = v.get('Spread', {})
+                for k, s in list(sp.items()):
+                    ln = s.get('line')
+                    if ln is not None:
+                        ah_fav_is_home = ln < 0
+                        if ah_fav_is_home != ml_fav_is_home:
+                            s['line'] = -ln
+                            hw, aw = s.get('home'), s.get('away')
+                            if hw is not None and aw is not None:
+                                s['home'], s['away'] = aw, hw
+    # 水位 HK→EU 扫尾：home/away/under 永远是水位，不是线位
+    # AH 的 HK 水位几乎都在 1.0 以内（含 1.0 = EU 2.0），>1.0 交由 _fl 处理
+    for bk_data in [curr, snap]:
+        for bk, v in bk_data.items():
+            for mk in ('Spread', 'Totals'):
+                for k, s in v.get(mk, {}).items():
+                    for field in ('home', 'away', 'under'):
+                        val = s.get(field)
+                        if isinstance(val, (int, float)) and 0.50 <= val <= 1.0:
+                            s[field] = round(val + 1.0, 2)
 
 
 def _log_match(r, name):
