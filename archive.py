@@ -94,6 +94,7 @@ def run_and_archive(input_path):
             json.dump(r, f, ensure_ascii=False, indent=2)
 
         # 总账记录
+        ta = r.get('交易决策', {}) or {}
         record = {
             'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'batch_id': batch_id,
@@ -101,10 +102,13 @@ def run_and_archive(input_path):
             'input_file': str(archived_input.relative_to(ARCHIVE)),
             'output_txt': str(txt_path.relative_to(ARCHIVE)),
             'output_json': str(json_path.relative_to(ARCHIVE)),
-            'prediction': r.get('结论', ''),
-            'direction': r.get('方向', ''),
-            'line': str(r.get('_bl', '')),
-            'ou': r.get('大小球', ''),
+            'system_conc': r.get('结论', ''),
+            'system_direction': r.get('方向', ''),
+            'system_line': str(r.get('_bl', '')),
+            'system_ou': r.get('大小球结论', ''),
+            'trader_side': ta.get('trade_side', ''),
+            'trader_product': ta.get('product', ''),
+            'trader_size': ta.get('size', ''),
             'actual_result': '',
             'pnl': '',
             'notes': ''
@@ -115,13 +119,15 @@ def run_and_archive(input_path):
     write_ledger(records)
 
     # 4. 终端输出
-    for r in records:
-        print(f"{r['match']} -> {r['prediction']} (归档: {r['output_txt']})")
+    for rec in records:
+        print(f"{rec['match']}  系统:{rec['system_conc']}  交易员:{rec['trader_side']}  (归档: {rec['output_txt']})")
 
 
 def write_ledger(records):
     fieldnames = ['date', 'batch_id', 'match', 'input_file', 'output_txt', 'output_json',
-                  'prediction', 'direction', 'line', 'ou', 'actual_result', 'pnl', 'notes']
+                  'system_conc', 'system_direction', 'system_line', 'system_ou',
+                  'trader_side', 'trader_product', 'trader_size',
+                  'actual_result', 'pnl', 'notes']
     write_header = not LEDGER.exists()
     with open(LEDGER, 'a', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -139,8 +145,8 @@ def list_records():
         rows = list(reader)
     print(f'共 {len(rows)} 条记录')
     for r in rows:
-        status = f"[{r['actual_result']}]" if r['actual_result'] else '[待结算]'
-        print(f"{r['date']} {r['match']:20s} {r['prediction']:10s} {status}")
+        status = f"[{r['actual_result']}]" if r.get('actual_result') else '[待结算]'
+        print(f"{r['date']} {r['match']:20s}  系统:{r.get('system_conc','?'):10s}  交易员:{r.get('trader_side','?'):10s} {status}")
 
 
 def update_result(match_query, actual_result, pnl='', notes=''):
