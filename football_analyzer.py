@@ -2081,8 +2081,8 @@ def _print(r, name):
         val = ta.get('value', '')
         if val:
             lines.append(f'')
-            lines.append(f'  📊 价值评估')
-            lines.append(f'  {val}')
+            lines.append(f'  ── 价值评估 ──')
+            lines.append(f'  📊 市场概率：{val}')
         jdg = ta.get('judgment', '')
         if jdg:
             lines.append(f'')
