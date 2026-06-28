@@ -2089,16 +2089,11 @@ def _print(r, name):
             if not s:
                 continue
             lines.append(f'  第{i+1}步 | {s}')
-    # 第三层：🎯 盘口交易员视角（判断）
+    # 第三层：🎯 盘口交易员视角（独立判断）
     ta = r.get('交易决策', {})
     if ta:
         lines.append('  ' + chr(0x2500) * 50)
-        lines.append('  🎯 盘口交易员视角（强制框架）')
-        lines.append(f'  Q1 庄家现在在干什么？   {ta.get("q1", "")}')
-        lines.append(f'  Q2 庄家为什么这样定价？ {ta.get("q2", "")}')
-        lines.append(f'  Q3 庄家承担哪边风险？   {ta.get("q3", "")}')
-        lines.append(f'  Q4 哪个结果最符合庄家赔付利益？ {ta.get("q4", "")}')
-        lines.append('')
+        lines.append('  🎯 盘口交易员视角（独立判断）')
         trade_side = ta.get('trade_side', 'PASS')
         product = ta.get('product', '-')
         if product and product != '-':
