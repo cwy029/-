@@ -2033,15 +2033,16 @@ def _normalize_ah_lines(mkt):
                             hw, aw = s.get('home'), s.get('away')
                             if hw is not None and aw is not None:
                                 s['home'], s['away'] = aw, hw
-    # 水位 HK→EU 扫尾：_fl 不会转换恰好 1.0 的值（0.25 倍数盲区）
+    # 水位 HK→EU 扫尾：home/away/under 永远是水位，不是线位
+    # 无论是否 0.25 倍数，0.50~1.50 范围内的全部转（覆盖 1.0, 1.25, 0.5 等盲区）
     for bk_data in [curr, snap]:
         for bk, v in bk_data.items():
             for mk in ('Spread', 'Totals'):
                 for k, s in v.get(mk, {}).items():
                     for field in ('home', 'away', 'under'):
                         val = s.get(field)
-                        if isinstance(val, (int, float)) and val == 1.0:
-                            s[field] = 2.0
+                        if isinstance(val, (int, float)) and 0.50 < val < 1.50:
+                            s[field] = round(val + 1.0, 2)
 
 
 def _log_match(r, name):
