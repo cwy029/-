@@ -1346,25 +1346,60 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
     第三层：盘口交易员视角。
     强制回答四个问题，最后给出庄家视角的交易建议。
     证据不足 → 推荐 PASS。
+    独立于系统结论：即使系统无方向(dir_ah=None)，交易员仍可自行判断。
     """
     home_name = name.split(' vs ')[0].strip()
     away_name = name.split(' vs ')[1].strip()
-    team = home_name if dir_ah == '+' else away_name
-    opp = away_name if dir_ah == '+' else home_name
-    wkey = 'home' if dir_ah == '+' else 'away'
 
-    bl = _pick_deepest_line(mkt['curr'], dir_ah)
+    # ── 交易员自行确定方向（不依赖系统）──
+    sigs = {}
+    for bk in BK_CORE:
+        snap_ln = _fl(_gs(bk, mkt['snap']).get('line'))
+        curr_ln = _fl(_gs(bk, mkt['curr']).get('line'))
+        sigs[bk] = sgn(_ld(snap_ln, curr_ln))
+    vf = sum(1 for s in sigs.values() if s == '+')
+    va = sum(1 for s in sigs.values() if s == '-')
+
+    if vf > va:
+        t_dir = '+'
+    elif va > vf:
+        t_dir = '-'
+    else:
+        t_dir = None  # 交易员也找不到方向
+
+    team = home_name if t_dir == '+' else away_name if t_dir == '-' else '?'
+    opp = away_name if t_dir == '+' else home_name if t_dir == '-' else '?'
+    wkey = 'home' if t_dir == '+' else 'away' if t_dir == '-' else None
+
+    bl = _pick_deepest_line(mkt['curr'], t_dir) if t_dir else None
     dir_on_fav = False
-    if bl is not None:
-        dir_on_fav = (dir_ah == '+' and bl < 0) or (dir_ah == '-' and bl > 0)
+    if bl is not None and t_dir:
+        dir_on_fav = (t_dir == '+' and bl < 0) or (t_dir == '-' and bl > 0)
 
-    # Q1-Q4
-    q1 = _describe_bookmaker_action(mkt, dir_ah)
-    # 引入第二层：合拍度 + 破绽
-    assess = evaluate_fit_and_flaw(mkt, dir_ah)
-    q2 = _explain_pricing(q1, mkt, dir_ah, price_v)
-    q3 = _bookmaker_risk(mkt, dir_ah, q1, q2)
-    comfort_score, comfort_ou = _comfortable_outcome(mkt, dir_ah, name)
+    if t_dir is None:
+        # 交易员也找不到方向 → 只看大小球
+        ou_dir, ou_desc = check_ou(mkt)
+        if ou_dir in ('大球', '小球'):
+            trade_side = ou_dir
+            ou_order = '大' if ou_dir == '大球' else '小'
+            for bk in ['Pinnacle', 'Bet365', 'singbet']:
+                cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+                if cc and _fl(cc.get('line')):
+                    product = f'{ou_order}{_fl(cc.get("line")):.2f}'
+                    break
+            else:
+                product = ou_dir
+            size = '5-10%'
+            reason = f'AH方向分裂，但大小球有明确{ou_dir}信号，单独交易OU'
+            return {'trade_side': trade_side, 'product': product, 'size': size, 'reason': reason}
+        return {'trade_side': 'PASS', 'product': '-', 'size': '0%', 'reason': '亚盘分裂，大小球也无明确信号，PASS'}
+
+    # 以下逻辑与原版相同，使用交易员自己的方向 t_dir
+    q1 = _describe_bookmaker_action(mkt, t_dir)
+    assess = evaluate_fit_and_flaw(mkt, t_dir)
+    q2 = _explain_pricing(q1, mkt, t_dir, price_v)
+    q3 = _bookmaker_risk(mkt, t_dir, q1, q2)
+    comfort_score, comfort_ou = _comfortable_outcome(mkt, t_dir, name)
     q4 = f'{comfort_score[0]}-{comfort_score[1]}（AH收方向注，{comfort_ou}）' if comfort_score else '无法判断'
 
     # 证据强度检查
@@ -1416,19 +1451,19 @@ def trader_analysis(mkt, dir_ah, system_conc, price_v, name):
         ah_reason = ''
 
         if '推盘' in q1 and '降水' in q1 and '降赔' in q1 and price_v != '偏贵':
-            ah_prod = f'{team}{_fmt_line(bl, dir_ah)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
+            ah_prod = f'{team}{_fmt_line(bl, t_dir)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
             ah_side = team
             ah_reason = f'庄家推盘+方向方降水+欧赔降赔，三线同步确认方向方定价，市场共识强化'
         elif '推盘' in q1 and '升水' in q1:
-            ah_prod = f'{opp}{_fmt_line(bl, "+" if dir_ah == "-" else "-") if bl else ""}'
+            ah_prod = f'{opp}{_fmt_line(bl, "+" if t_dir == "-" else "-") if bl else ""}'
             ah_side = opp
             ah_reason = f'庄家推盘但主动升水，让利吸引方向方资金流入，真实意图更倾向于对方'
         elif '平赔降' in q1 or '平赔骤降' in q1:
-            ah_prod = f'{opp}{_fmt_line(bl, "+" if dir_ah == "-" else "-") if bl else ""}'
+            ah_prod = f'{opp}{_fmt_line(bl, "+" if t_dir == "-" else "-") if bl else ""}'
             ah_side = opp
             ah_reason = f'庄家平赔全线下降，大量承接平局资金，方向方赢面受压'
         elif price_v == '合理' or price_v == '偏便宜':
-            ah_prod = f'{team}{_fmt_line(bl, dir_ah)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
+            ah_prod = f'{team}{_fmt_line(bl, t_dir)} @{best_w:.2f} ({BK_LABEL.get(best_bk,"Pin")})'
             ah_side = team
             ah_reason = f'庄家未对方向方追价，当前盘口价格处于均衡区间'
 
@@ -1532,33 +1567,30 @@ def analyze(name, mkt):
 
     # ── ① 找方向 ──
     dir_ah, qual, signals, dissent_bk, active, dir_mode = get_direction(mkt)
-    if dir_ah is None:
-        sigs = ' '.join(f'{BK_LABEL[b]}{signals[b]}' for b in BK_CORE)
-        result['信号'] = sigs
-        return _fin(result, 'PASS', f'无方向（{sigs}）', info)
-
-    result['方向'] = dir_ah
-    result['方向模式'] = dir_mode
+    # 即使无方向也不提前 return，交易员需要有机会判断
     sig_core = ' '.join(f'{BK_LABEL[b]}{signals[b]}' for b in BK_CORE)
     result['信号'] = sig_core
-    result['_bl'] = _pick_deepest_line(mkt['curr'], dir_ah)
 
-    if dir_mode == 'static':
-        info.append(f'静态位置：{sig_core}')
-    elif active == 3:
-        info.append(f'方向一致：{sig_core}')
-        verdicts.append('方向明确')
-    elif active == 2 and dissent_bk:
-        d = BK_LABEL.get(dissent_bk, dissent_bk) or '?'
-        info.append(f'方向成立（{d}分歧）：{sig_core}')
-        verdicts.append('方向有分歧')
-    elif active == 2:
-        info.append(f'两家一致：{sig_core}')
-        verdicts.append('方向明确')
-    else:
-        voter = next((BK_LABEL[b] for b in BK_CORE if signals[b] != '0'), '?')
-        info.append(f'单家指向（{voter}）：{sig_core}')
-        verdicts.append('方向偏弱')
+    if dir_ah is not None:
+        result['方向'] = dir_ah
+        result['方向模式'] = dir_mode
+        result['_bl'] = _pick_deepest_line(mkt['curr'], dir_ah)
+        if dir_mode == 'static':
+            info.append(f'静态位置：{sig_core}')
+        elif active == 3:
+            info.append(f'方向一致：{sig_core}')
+            verdicts.append('方向明确')
+        elif active == 2 and dissent_bk:
+            d = BK_LABEL.get(dissent_bk, dissent_bk) or '?'
+            info.append(f'方向成立（{d}分歧）：{sig_core}')
+            verdicts.append('方向有分歧')
+        elif active == 2:
+            info.append(f'两家一致：{sig_core}')
+            verdicts.append('方向明确')
+        else:
+            voter = next((BK_LABEL[b] for b in BK_CORE if signals[b] != '0'), '?')
+            info.append(f'单家指向（{voter}）：{sig_core}')
+            verdicts.append('方向偏弱')
 
     # ── 平赔预警（信息，先算，过路时带上） ──
     dd = check_draw_drop(mkt)
@@ -1579,43 +1611,40 @@ def analyze(name, mkt):
             info.append(f'轻度收敛（初盘极差{snap_rg}→现盘极差{curr_rg}）')
             verdicts.append('轻度收敛')
 
-    # 平局翻转
-    draw_f, draw_src, draw_type = check_draw_signal(mkt, dir_ah)
+    # 平局翻转（仅在有方向时）
     flipped = False
-    if draw_f:
-        # 判断方向方是让球方还是受让方
-        # 线位<0=主队让球(主队是让球方) 线位>0=客队让球(客队是让球方)
-        # 只有方向方=让球方时才翻转，否则保持方向
-        ref_line = None
-        for bk in BK_CORE:
-            ln = _fl(_gs(bk, mkt['curr']).get('line'))
-            if ln is not None:
-                ref_line = ln
-                break
-        can_flip = False
-        if ref_line is not None and ref_line != 0:
-            if dir_ah == '+' and ref_line < 0:
-                can_flip = True  # 方向主队 + 主队让球 = 让球方
-            elif dir_ah == '-' and ref_line > 0:
-                can_flip = True  # 方向客队 + 客队让球 = 让球方
+    if dir_ah is not None:
+        draw_f, draw_src, draw_type = check_draw_signal(mkt, dir_ah)
+        if draw_f:
+            ref_line = None
+            for bk in BK_CORE:
+                ln = _fl(_gs(bk, mkt['curr']).get('line'))
+                if ln is not None:
+                    ref_line = ln
+                    break
+            can_flip = False
+            if ref_line is not None and ref_line != 0:
+                if dir_ah == '+' and ref_line < 0:
+                    can_flip = True
+                elif dir_ah == '-' and ref_line > 0:
+                    can_flip = True
+            src_name = '平赔骤降' if draw_type == 'B' else (BK_FULL.get(draw_src, draw_src) if draw_src else '?')
+            if can_flip:
+                flipped = True
+                dir_ah = '-' if dir_ah == '+' else '+'
+                result['方向'] = dir_ah
+                info.append(f'平局信号（{src_name}），从让球方翻转到受让方')
+                verdicts.append('平局翻转')
+                result['_bl'] = _pick_deepest_line(mkt['curr'], dir_ah)
+                result['翻转类型'] = '让球方→受让方'
+            else:
+                flipped = True
+                result['翻转类型'] = '方向已在受让方（平局信号触发）'
+                info.append(f'平局信号（{src_name}），方向已在受让方，无需翻转')
+                verdicts.append('平局信号（无需翻转）')
 
-        src_name = '平赔骤降' if draw_type == 'B' else (BK_FULL.get(draw_src, draw_src) if draw_src else '?')
-        if can_flip:
-            flipped = True
-            dir_ah = '-' if dir_ah == '+' else '+'
-            result['方向'] = dir_ah
-            info.append(f'平局信号（{src_name}），从让球方翻转到受让方')
-            verdicts.append('平局翻转')
-            result['_bl'] = _pick_deepest_line(mkt['curr'], dir_ah)
-            result['翻转类型'] = '让球方→受让方'
-        else:
-            flipped = True  # 标记已处理平局信号，避免被共识否决提前 return
-            result['翻转类型'] = '方向已在受让方（平局信号触发）'
-            info.append(f'平局信号（{src_name}），方向已在受让方，无需翻转')
-            verdicts.append('平局信号（无需翻转）')
-
-    # 欧赔检查
-    euro_v, euro_d = check_euro(mkt, dir_ah)
+    # 欧赔检查（独立于方向，仅用于系统参考）
+    euro_v, euro_d = check_euro(mkt, dir_ah if dir_ah else '-')
     euro_str = ' '.join(f'{BK_LABEL[b]}{v[0]}' for b, v in
                         sorted(euro_d.items(), key=lambda x: BK_EURO.index(x[0])))
     result['欧赔'] = euro_v
@@ -1625,22 +1654,25 @@ def analyze(name, mkt):
     else:
         verdicts.append('欧赔中性')
 
-    # ── ③ 价格发现（Price Discovery）──
-    price_v, price_d = check_price(mkt, dir_ah, None)
+    # ── ③ 价格发现（Price Discovery，仅在有方向时）──
+    price_v = '合理'
+    price_d = '无方向，不适用'
+    if dir_ah is not None:
+        price_v, price_d = check_price(mkt, dir_ah, None)
     price_label = '强化' if price_v == '偏便宜' else '确认' if price_v == '合理' else '存疑'
     result['价格'] = price_v
     result['价格结论'] = price_label
     info.append(f'{price_label}（{price_d}）')
     verdicts.append(f'价格{price_label}')
 
-    # ── 盘口管理分析（提前计算，确保所有路径都能输出）──
+    # ── 盘口管理分析 ──
     if dir_ah is not None:
         best_line, bal_items = bookmaker_balance(mkt, dir_ah, flipped, name)
         result['盘口管理'] = bal_items
         result['_best_line'] = best_line
 
-    # ── 庄家反证（Bookmaker Challenge，提前计算）──
-    bc_level, bc_reason = bookmaker_challenge(mkt, dir_ah, active, price_v, euro_v)
+    # ── 庄家反证（Bookmaker Challenge）──
+    bc_level, bc_reason = bookmaker_challenge(mkt, dir_ah, active if dir_ah else 0, price_v, euro_v)
     result['BC'] = bc_level
     result['BC理由'] = bc_reason
     if bc_level == '过热':
@@ -1652,26 +1684,29 @@ def analyze(name, mkt):
     else:
         result['BC判决'] = '无异议'
 
-    # 共识否决 → PASS（翻转后欧赔反对可接受，但放在价格/BC/盘口之后确保完整输出）
-    if euro_v == '反对' and not flipped:
-        return _fin(result, 'PASS', f'共识否决：欧赔反对（{euro_str}）', info)
+    # ── ④ 风控否决（Risk Filter）──
+    if dir_ah is not None:
+        risk = check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signals)
+        if risk:
+            risk_conc, risk_reason = risk
+            info.append(risk_reason)
+            return _fin(result, risk_conc, risk_reason, info, flipped)
 
-    # ── ④ 风控否决（Risk Filter，含R4/R5结构否决）──
-    risk = check_risk_filter(mkt, dir_ah, active, qual, price_v, euro_v, flipped, signals)
-    if risk:
-        risk_conc, risk_reason = risk
-        info.append(risk_reason)
-        return _fin(result, risk_conc, risk_reason, info, flipped)
+    # ── 合拍度 + 破绽（仅在系统有方向时）──
+    if dir_ah is not None:
+        _assess = evaluate_fit_and_flaw(mkt, dir_ah)
+        result['合拍度'] = _assess['fit']
+        result['合拍度理由'] = _assess['fit_reasons']
+        result['破绽'] = _assess['flaws']
+    else:
+        result['合拍度'] = '—'
+        result['破绽'] = []
 
-    # ── 合拍度 + 破绽（系统结论的补充维度）──
-    _assess = evaluate_fit_and_flaw(mkt, dir_ah)
-    result['合拍度'] = _assess['fit']
-    result['合拍度理由'] = _assess['fit_reasons']
-    result['破绽'] = _assess['flaws']
-
-    # ── ⑥ 最终决策（Final Decision）──
-    # 第一层：系统结论快速分类
-    if flipped:
+    # ── ⑥ 最终决策（系统结论）──
+    if dir_ah is None:
+        system_conc = 'PASS'
+        system_reason = '无方向（亚盘三家投票分裂或无变动）'
+    elif flipped:
         if euro_v == '反对':
             system_conc = 'PASS'
             system_reason = '翻转后欧赔仍反对'
@@ -1694,7 +1729,7 @@ def analyze(name, mkt):
         system_conc = 'EXECUTE'
         system_reason = '方向明确·共识支持·价格确认'
 
-    # 第三层：交易员决策（严格按 TRADING_FLOW.md 框架，无框架不输出）
+    # 第三层：交易员决策（独立，始终执行）
     trading = trader_analysis(mkt, dir_ah, system_conc, price_v, name)
     info.append(f'交易员独立判断：{trading["reason"]}')
 
