@@ -2070,76 +2070,85 @@ def _print(r, name):
 
     lines.append('')
 
-    # ── 🎯 盘口交易员判断（强制 Q1-Q4，数据源：庄家平衡） ──
-    lines.append('━━━ 🎯 盘口交易员判断（强制 Q1-Q4）━━━')
+    # ── 🎯 交易员数据摘要（供6段分析引用） ──
+    lines.append('━━━ 🎯 交易员数据摘要（6段框架引用）━━━')
     ta = r.get('交易决策', {})
     val = ta.get('value', '') if ta else ''
-    jdg = ta.get('judgment', '') if ta else ''
     if val:
         lines.append(f'  📊 {val}')
 
     bal = r.get('盘口管理', [])
 
-    # Q1: AH线位变动 → 市场共识（排除大小球行）
-    _line_moves = [b for b in bal if ('推盘' in b or '退盘' in b) and '大小球' not in b]
-    _line_summary = '；'.join(_line_moves) if _line_moves else 'AH无线位变动'
+    # 线位变动摘要（含Delta）
+    _line_moves = []
+    for b in bal:
+        if ('推盘' in b or '退盘' in b) and '大小球' not in b:
+            _line_moves.append(b)
+    lines.append(f'  📐 线位：{"；".join(_line_moves) if _line_moves else "无线位变动"}')
 
-    # Q2: 水位变动细节（仅AH水位，排除大小球）
-    _water_moves = [b for b in bal if ('升0' in b or '降0' in b) and ('Pin' in b or '365' in b or 'Crown' in b) and '大小球' not in b]
-    _water_detail = '；'.join(_water_moves[:2]) if _water_moves else '无水位变动'
+    # 水位变动摘要（含Delta数值）
+    _water_detail = []
+    for b in bal:
+        if ('升0' in b or '降0' in b) and ('Pin' in b or '365' in b or 'Crown' in b) and '大小球' not in b:
+            _water_detail.append(b)
+    lines.append(f'  💧 水位：{"；".join(_water_detail[:3]) if _water_detail else "无变动"}')
 
-    # Q3: 方向方水位检查（3/3=全面偏贵，2/3=分化，0-1/3=正常）
+    # 方向方水位偏贵检查
+    import re as _re
     _fav_up = 0
     _fav_down = 0
     for b in bal:
         if 'Pin' in b or '365' in b or 'Crown' in b:
             for bk in ['Pin', '365', 'Crown']:
-                if f'{bk}升' in b:
+                if f'{bk}升' in b and '大小球' not in b:
                     _fav_up += 1
-                elif f'{bk}降' in b:
+                elif f'{bk}降' in b and '大小球' not in b:
                     _fav_down += 1
-    _total = _fav_up + _fav_down
     if _fav_up >= 3:
-        _price_warn = '⚠ 方向方水全面上升=偏贵信号'
-    elif _fav_up >= 2 and _fav_down >= 1:
-        _price_warn = '⚠ 方向方水位分化（升水为主）'
-    elif _fav_up == 2:
-        _price_warn = '⚠ 方向方水上升=偏贵信号'
+        _price_warn = '⚠ 方向方水全面上升（3/3），偏贵'
+    elif _fav_up == 2 and _fav_down == 1:
+        _price_warn = '⚠ 方向方水2升1降，分化'
+    elif _fav_up >= 1:
+        _price_warn = f'⚠ 方向方水{_fav_up}家升，部分偏贵'
     else:
-        _price_warn = '方向方水未全面上升'
+        _price_warn = '方向方水位正常'
+    lines.append(f'  💲 价格：{_price_warn}')
 
-    # Q4: 极端值 + 分歧 + 诱导
-    _q4_parts = []
-    if any('分歧' in b for b in bal):
-        _q4_parts.append('⚠ 跨庄分歧')
-    import re
+    # 大小球线位+水位摘要
+    _ou_detail = []
     for b in bal:
-        # 匹配 升0.XX 或 降0.XX 或 涨0.XX 模式
-        for m in re.finditer(r'(?:升|降|涨)0\.(\d+)', b):
+        if '大小球' in b and ('Pin' in b or '365' in b or 'Crown' in b):
+            _ou_detail.append(b)
+    lines.append(f'  ⚽ 大小球：{"；".join(_ou_detail[:3]) if _ou_detail else "—"}')
+
+    # 极端水位检查
+    _extreme_notes = []
+    for b in bal:
+        if '大小球' in b:
+            for m in _re.finditer(r'(?:大球水|小球水)\s*([\d.]+)', b):
+                wv = float(m.group(1))
+                if '大球' in m.group() and wv < 1.80:
+                    _extreme_notes.append(f'{m.group()} < 1.80')
+                elif '小球' in m.group() and wv > 2.10:
+                    _extreme_notes.append(f'{m.group()} > 2.10')
+        # AH水位大幅变动检查
+        for m in _re.finditer(r'(?:升|降|涨)0\.(\d+)', b):
             try:
-                val = float('0.' + m.group(1))
-                if val >= 0.30:
-                    _q4_parts.append('⚠ 极端水位(≥0.30)')
-                    break
-            except: pass
-    if any('诱' in b for b in bal):
-        _q4_parts.append('⚠ 诱导信号')
-    _q4 = '；'.join(_q4_parts) if _q4_parts else '无'
+                delta_v = float('0.' + m.group(1))
+                if delta_v >= 0.30:
+                    _extreme_notes.append(f'水位变动≥0.30：{b}')
+            except:
+                pass
+    lines.append(f'  🔴 极端水位：{"；".join(_extreme_notes) if _extreme_notes else "未达阈值"}')
 
-    lines.append(f'  Q1 线位共识：{_line_summary}')
-    lines.append(f'  Q2 水位变化：{_water_detail}')
-    lines.append(f'  Q3 价格信号：{_price_warn}')
-    lines.append(f'  Q4 异常检测：{_q4}')
-    lines.append(f'')
-    lines.append(f'  ⛔ 先过 Q1-Q4，再出判断，不跳步不预判')
+    # 合拍度/破绽/结论
+    fit_str = r.get('合拍度', '—')
+    flaw_str = '；'.join(r.get('破绽', [])) if r.get('破绽') else '无'
+    conc = r.get('结论', 'PASS')
+    lines.append(f'  🤝 合拍度：{fit_str}  |  破绽：{flaw_str}  |  结论：{conc}')
 
-    if jdg:
-        lines.append(f'')
-        lines.append(f'  🧑‍💼 交易员判断')
-        for line in jdg.split('\n'):
-            line = line.strip()
-            if line:
-                lines.append(f'  {line}')
+    lines.append('')
+    lines.append('  ⛔ 以上为引擎数据摘要。6段分析由交易员在回复中完成。')
 
     for l in lines:
         print(l)
