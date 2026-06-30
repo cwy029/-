@@ -467,6 +467,51 @@ def _ou_vote(bk, mkt):
         return '中性', '线位水位未动', cl, ch, cu
 
 
+def _ou_strength(mkt):
+    """大小球信号强度评分（0-5）。
+    评分维度：退/升盘幅度 + 三家一致性 + 水位变动幅度
+    """
+    total_score = 0
+    line_moves = []
+    water_deltas = []
+    for bk in BK_CORE:
+        sc = next(iter(mkt.get('snap', {}).get(bk, {}).get('Totals', {}).values()), None)
+        cc = next(iter(mkt.get('curr', {}).get(bk, {}).get('Totals', {}).values()), None)
+        if sc and cc:
+            sl = _fl(sc.get('line'))
+            cl = _fl(cc.get('line'))
+            so = _fl(sc.get('home'))
+            co = _fl(cc.get('home'))
+            if sl is not None and cl is not None:
+                line_moves.append(round(cl - sl, 2))
+            if so is not None and co is not None:
+                water_deltas.append(round(co - so, 2))
+
+    if not line_moves:
+        return 0
+
+    # 维度1：线位变动幅度（取绝对值最大）
+    max_move = max(abs(m) for m in line_moves) if line_moves else 0
+    if max_move >= 0.5:
+        total_score += 2
+    elif max_move >= 0.25:
+        total_score += 1
+
+    # 维度2：三家一致性
+    same_dir = len([m for m in line_moves if (m > 0) == (line_moves[0] > 0)]) if line_moves else 0
+    if same_dir >= 3:
+        total_score += 2
+    elif same_dir >= 2:
+        total_score += 1
+
+    # 维度3：水位变动幅度（取绝对值最大）
+    max_water = max(abs(w) for w in water_deltas) if water_deltas else 0
+    if max_water >= 0.15:
+        total_score += 1
+
+    return min(total_score, 5)
+
+
 def check_ou(mkt):
     """大小球：三家交叉投票，取多数决。
     返回 (方向, 说明)
@@ -1264,7 +1309,10 @@ def evaluate_fit_and_flaw(mkt, dir_ah):
 
     ou_dir, ou_desc = check_ou(mkt)
     ou_is_trap = ou_desc and '诱盘' in ou_desc
-    ou_strong = ou_dir in ('大球', '小球') and not ou_is_trap
+    # _ou_vote 返回的 ou_dir 已经是真实方向（检测到价量背离后自动取反）
+    # 诱盘时信号依然有效，只是庄家在用反向水位吸引散户
+    ou_real = ou_dir
+    ou_strong = ou_real in ('大球', '小球')
 
     score = 0
     fit_reasons = []
@@ -1279,19 +1327,23 @@ def evaluate_fit_and_flaw(mkt, dir_ah):
         score -= 1
         fit_reasons.append('平赔跌')
 
-    if ou_dir:
-        if dir_on_fav and ou_dir == '大球' and ou_strong:
+    if ou_real:
+        if dir_on_fav and ou_real == '大球' and ou_strong:
             score += 1
             fit_reasons.append('AH/OU同向')
-        elif dir_on_fav and ou_dir == '小球' and ou_strong:
+        elif dir_on_fav and ou_real == '小球' and ou_strong:
             score -= 1
             fit_reasons.append('AH/OU矛盾')
-        elif not dir_on_fav and ou_dir == '小球' and ou_strong:
+        elif not dir_on_fav and ou_real == '小球' and ou_strong:
             score += 1
             fit_reasons.append('AH/OU同向')
-        elif not dir_on_fav and ou_dir == '大球' and ou_strong:
+        elif not dir_on_fav and ou_real == '大球' and ou_strong:
             score -= 1
             fit_reasons.append('AH/OU矛盾')
+    if ou_is_trap:
+        # 诱盘方向 = 散户被骗的方向（与真实方向相反）
+        trap_side = '小球' if ou_dir == '大球' else '大球'
+        fit_reasons.append(f'诱{trap_side}')
 
     if score >= 1:
         fit = '合拍'
@@ -1304,11 +1356,11 @@ def evaluate_fit_and_flaw(mkt, dir_ah):
     flaws = []
     if ou_is_trap:
         if '大球水升' in (ou_desc or ''):
-            trap_label = '诱大球'
+            trap_label = '诱大球→真看小'
         elif '小球水升' in (ou_desc or ''):
-            trap_label = '诱小球'
+            trap_label = '诱小球→真看大'
         else:
-            trap_label = f'{ou_dir}(诱盘)'
+            trap_label = f'诱{ou_dir}→真看{"小球" if ou_dir=="大球" else "大球"}'
         flaws.append(trap_label)
 
     # 亚盘滞后定价
@@ -1437,6 +1489,7 @@ def analyze(name, mkt):
     # 大小球（先算，所有路径都能展示）
     ou_dir, ou_desc = check_ou(mkt)
     result['大小球'] = f'{ou_dir} {ou_desc}' if ou_dir else None
+    result['ou_strength'] = _ou_strength(mkt)
 
     # ── ① 找方向 ──
     dir_ah, qual, signals, dissent_bk, active, dir_mode = get_direction(mkt)
@@ -1676,9 +1729,20 @@ def _parse_md(text):
         m_match = re.match(r'#+\s*(?:比赛\s*\d*[：:]\s*)?(.+?)\s*$', l)
         if m_match and 'vs' in m_match.group(1).lower():
             name = m_match.group(1).strip()
-            name = re.sub(r'[（(].*?[）)]', '', name).strip()
-            if ' vs ' not in name and ' VS ' in name:
-                name = name.replace(' VS ', ' vs ')
+            # 清洗赛事前缀：取 vs 两侧最后的词作为队名
+            if ' vs ' in name or ' VS ' in name:
+                vs_pat = re.split(r'\s+vs\s+', name, flags=re.IGNORECASE)
+                if len(vs_pat) == 2:
+                    h = vs_pat[0].strip()
+                    a = vs_pat[1].strip()
+                    h = re.sub(r'^.*?[-–—]\s*', '', h).strip()
+                    h = re.sub(r'\s*\[\d+\]', '', h).strip()
+                    h = re.sub(r'[（(].*?[）)]', '', h).strip()
+                    a = re.sub(r'\s*\[\d+\]', '', a).strip()
+                    a = re.sub(r'[（(].*?[）)]', '', a).strip()
+                    name = f'{h} vs {a}'
+            else:
+                name = re.sub(r'[（(].*?[）)]', '', name).strip()
 
         # 对阵信息行：- **对阵**: 哥伦比亚 vs 葡萄牙 / - **对阵双方**: 哥伦比亚 vs 葡萄牙
         m_vs_info = re.search(r'[-\*]*\s*\*?\*?\s*对阵(?:双方)?\s*\*?\*?\s*[：:]\s*(.+?)\s*$', l)
@@ -2093,16 +2157,18 @@ def _print(r, name):
             _water_detail.append(b)
     lines.append(f'  💧 水位：{"；".join(_water_detail[:3]) if _water_detail else "无变动"}')
 
-    # 方向方水位偏贵检查
+    # 方向方水位偏贵检查（只统计亚盘水位，排除大小球条目）
     import re as _re
     _fav_up = 0
     _fav_down = 0
     for b in bal:
+        if '大小球' in b or '大球' in b or '小球' in b:
+            continue  # 大小球条目一律跳过
         if 'Pin' in b or '365' in b or 'Crown' in b:
             for bk in ['Pin', '365', 'Crown']:
-                if f'{bk}升' in b and '大小球' not in b:
+                if f'{bk}升' in b:
                     _fav_up += 1
-                elif f'{bk}降' in b and '大小球' not in b:
+                elif f'{bk}降' in b:
                     _fav_down += 1
     if _fav_up >= 3:
         _price_warn = '⚠ 方向方水全面上升（3/3），偏贵'
@@ -2119,7 +2185,9 @@ def _print(r, name):
     for b in bal:
         if '大小球' in b and ('Pin' in b or '365' in b or 'Crown' in b):
             _ou_detail.append(b)
-    lines.append(f'  ⚽ 大小球：{"；".join(_ou_detail[:3]) if _ou_detail else "—"}')
+    _ou_str_score = r.get('ou_strength', 0)
+    _ou_str_label = f'（信号强度{_ou_str_score}/5）' if _ou_str_score > 0 else ''
+    lines.append(f'  ⚽ 大小球：{"；".join(_ou_detail[:3]) if _ou_detail else "—"}{_ou_str_label}')
 
     # 极端水位检查
     _extreme_notes = []
@@ -2127,10 +2195,16 @@ def _print(r, name):
         if '大小球' in b:
             for m in _re.finditer(r'(?:大球水|小球水)\s*([\d.]+)', b):
                 wv = float(m.group(1))
-                if '大球' in m.group() and wv < 1.80:
-                    _extreme_notes.append(f'{m.group()} < 1.80')
-                elif '小球' in m.group() and wv > 2.10:
-                    _extreme_notes.append(f'{m.group()} > 2.10')
+                if '大球' in m.group():
+                    if wv < 1.80:
+                        _extreme_notes.append(f'{m.group()} < 1.80（极端）')
+                    elif wv < 1.90:
+                        _extreme_notes.append(f'{m.group()} < 1.90（明显偏低）')
+                elif '小球' in m.group():
+                    if wv > 2.10:
+                        _extreme_notes.append(f'{m.group()} > 2.10（极端）')
+                    elif wv > 2.00:
+                        _extreme_notes.append(f'{m.group()} > 2.00（偏高）')
         # AH水位大幅变动检查
         for m in _re.finditer(r'(?:升|降|涨)0\.(\d+)', b):
             try:
@@ -2141,11 +2215,8 @@ def _print(r, name):
                 pass
     lines.append(f'  🔴 极端水位：{"；".join(_extreme_notes) if _extreme_notes else "未达阈值"}')
 
-    # 合拍度/破绽/结论
-    fit_str = r.get('合拍度', '—')
-    flaw_str = '；'.join(r.get('破绽', [])) if r.get('破绽') else '无'
-    conc = r.get('结论', 'PASS')
-    lines.append(f'  🤝 合拍度：{fit_str}  |  破绽：{flaw_str}  |  结论：{conc}')
+    # 水位偏贵 + 极端水位汇总（仅数据，不做结论）
+    lines.append('')
 
     lines.append('')
     lines.append('  ⛔ 以上为引擎数据摘要。6段分析由交易员在回复中完成。')
